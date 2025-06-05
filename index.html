@@ -37,12 +37,12 @@
                     clientId: CLIENT_ID,
                     scope: SCOPE,
                     discoveryDocs: DISCOVERY_DOCS,
-                    redirectUri: 'https://aaahsisiaid.github.io' // GitHub Pages の URL
+                    redirectUri: 'https://aaahsisiaid.github.io'
                 }).then(() => {
                     gapi.auth2.getAuthInstance().isSignedIn.listen(updateSigninStatus);
                     updateSigninStatus(gapi.auth2.getAuthInstance().isSignedIn.get());
                 }).catch(error => {
-                    console.error('初期化エラー:', error);
+                    console.error('初期化エラー:', JSON.stringify(error, null, 2));
                     alert('初期化に失敗しました: ' + JSON.stringify(error));
                 });
             });
@@ -54,7 +54,7 @@
 
         function signIn() {
             gapi.auth2.getAuthInstance().signIn().catch(error => {
-                console.error('ログインエラー:', error);
+                console.error('ログインエラー:', JSON.stringify(error, null, 2));
                 alert('ログインに失敗しました: ' + JSON.stringify(error));
             });
         }

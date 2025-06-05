@@ -16,55 +16,68 @@
 <body>
     <h1>YouTube に動画をアップロード</h1>
     <span id="signinButton" class="pre-sign-in">
-        <button onclick="signIn()">Google ログイン</button>
+        <button onclick="handleAuthClick()">Google ログイン</button>
     </span>
     <div class="post-sign-in">
         <input type="file" id="videoFile" accept="video/*">
         <button onclick="uploadVideo()">アップロード</button>
     </div>
 
+    <!-- Google Identity Services ライブラリ -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <!-- YouTube API クライアントライブラリ -->
     <script src="https://apis.google.com/js/api.js"></script>
     <script>
         const CLIENT_ID = '320694642206-n0gk8vc7v6a3e2calbcp7r3jl50bic5p.apps.googleusercontent.com';
         const API_KEY = 'AIzaSyCtUAPx02UxgEQtJzYcbRA1rJd5vi5AjaM';
         const SCOPE = 'https://www.googleapis.com/auth/youtube.upload';
         const DISCOVERY_DOCS = ['https://www.googleapis.com/discovery/v1/apis/youtube/v3/rest'];
+        let accessToken = null;
 
+        // GIS 認証の初期化
         function initClient() {
-            gapi.load('client:auth2', () => {
+            gapi.load('client', () => {
                 gapi.client.init({
                     apiKey: API_KEY,
-                    clientId: CLIENT_ID,
-                    scope: SCOPE,
-                    discoveryDocs: DISCOVERY_DOCS,
-                    redirectUri: 'https://aaahsisiaid.github.io',
-                    fetch_basic_profile: false // 不要なスコープを無効化
+                    discoveryDocs: DISCOVERY_DOCS
                 }).then(() => {
-                    gapi.auth2.getAuthInstance().isSignedIn.listen(updateSigninStatus);
-                    updateSigninStatus(gapi.auth2.getAuthInstance().isSignedIn.get());
+                    console.log('YouTube API クライアント初期化完了');
                 }).catch(error => {
-                    console.error('初期化エラー:', JSON.stringify(error, null, 2));
-                    alert('初期化に失敗しました: ' + JSON.stringify(error));
+                    console.error('YouTube API 初期化エラー:', JSON.stringify(error, null, 2));
+                    alert('YouTube API 初期化に失敗しました: ' + JSON.stringify(error));
                 });
             });
         }
 
-        function updateSigninStatus(isSignedIn) {
-            document.body.className = isSignedIn ? 'signed-in' : '';
-        }
-
-        function signIn() {
-            gapi.auth2.getAuthInstance().signIn().catch(error => {
-                console.error('ログインエラー:', JSON.stringify(error, null, 2));
-                alert('ログインに失敗しました: ' + JSON.stringify(error));
+        // Google ログイン処理
+        function handleAuthClick() {
+            const client = google.accounts.oauth2.initTokenClient({
+                client_id: CLIENT_ID,
+                scope: SCOPE,
+                callback: (response) => {
+                    if (response.error) {
+                        console.error('認証エラー:', JSON.stringify(response, null, 2));
+                        alert('認証に失敗しました: ' + JSON.stringify(response));
+                        return;
+                    }
+                    accessToken = response.access_token;
+                    document.body.className = 'signed-in';
+                    console.log('認証成功、アクセストークン:', accessToken);
+                }
             });
+            client.requestAccessToken();
         }
 
+        // 動画アップロード
         function uploadVideo() {
             const fileInput = document.getElementById('videoFile');
             const file = fileInput.files[0];
             if (!file) {
                 alert('動画ファイルを選択してください');
+                return;
+            }
+            if (!accessToken) {
+                alert('先に Google ログインしてください');
                 return;
             }
 
@@ -81,7 +94,7 @@
 
             const xhr = new XMLHttpRequest();
             xhr.open('POST', 'https://www.googleapis.com/upload/youtube/v3/videos?part=snippet,status', true);
-            xhr.setRequestHeader('Authorization', 'Bearer ' + gapi.auth2.getAuthInstance().currentUser.get().getAuthResponse().access_token);
+            xhr.setRequestHeader('Authorization', 'Bearer ' + accessToken);
             xhr.setRequestHeader('Content-Type', 'multipart/related; boundary=foo_bar_baz');
 
             let body = '--foo_bar_baz\r\n';
@@ -114,6 +127,7 @@
             };
         }
 
+        // 初期化
         initClient();
     </script>
 </body>

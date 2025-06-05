@@ -37,7 +37,7 @@
                     clientId: CLIENT_ID,
                     scope: SCOPE,
                     discoveryDocs: DISCOVERY_DOCS,
-                    redirectUri: 'http://localhost:8000' // Explicitly set redirect URI
+                    redirectUri: 'https://aaahsisiaid.github.io' // GitHub Pages の URL
                 }).then(() => {
                     gapi.auth2.getAuthInstance().isSignedIn.listen(updateSigninStatus);
                     updateSigninStatus(gapi.auth2.getAuthInstance().isSignedIn.get());

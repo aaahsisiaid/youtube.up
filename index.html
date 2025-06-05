@@ -37,7 +37,8 @@
                     clientId: CLIENT_ID,
                     scope: SCOPE,
                     discoveryDocs: DISCOVERY_DOCS,
-                    redirectUri: 'https://aaahsisiaid.github.io'
+                    redirectUri: 'https://aaahsisiaid.github.io',
+                    fetch_basic_profile: false // 不要なスコープを無効化
                 }).then(() => {
                     gapi.auth2.getAuthInstance().isSignedIn.listen(updateSigninStatus);
                     updateSigninStatus(gapi.auth2.getAuthInstance().isSignedIn.get());

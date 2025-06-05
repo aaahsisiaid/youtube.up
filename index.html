@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>YouTube 動画アップロード</title>
+    <style>
+        .pre-sign-in { display: block; }
+        .post-sign-in { display: none; }
+        .signed-in .pre-sign-in { display: none; }
+        .signed-in .post-sign-in { display: block; }
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        button { padding: 10px 20px; margin: 10px; }
+        input { margin: 10px; }
+    </style>
+</head>
+<body>
+    <h1>YouTube に動画をアップロード</h1>
+    <span id="signinButton" class="pre-sign-in">
+        <button onclick="signIn()">Google ログイン</button>
+    </span>
+    <div class="post-sign-in">
+        <input type="file" id="videoFile" accept="video/*">
+        <button onclick="uploadVideo()">アップロード</button>
+    </div>
+
+    <script src="https://apis.google.com/js/api.js"></script>
+    <script>
+        const CLIENT_ID = '320694642206-n0gk8vc7v6a3e2calbcp7r3jl50bic5p.apps.googleusercontent.com';
+        const API_KEY = 'AIzaSyCtUAPx02UxgEQtJzYcbRA1rJd5vi5AjaM';
+        const SCOPE = 'https://www.googleapis.com/auth/youtube.upload';
+        const DISCOVERY_DOCS = ['https://www.googleapis.com/discovery/v1/apis/youtube/v3/rest'];
+
+        function initClient() {
+            gapi.load('client:auth2', () => {
+                gapi.client.init({
+                    apiKey: API_KEY,
+                    clientId: CLIENT_ID,
+                    scope: SCOPE,
+                    discoveryDocs: DISCOVERY_DOCS,
+                    redirectUri: 'http://localhost:8000' // Explicitly set redirect URI
+                }).then(() => {
+                    gapi.auth2.getAuthInstance().isSignedIn.listen(updateSigninStatus);
+                    updateSigninStatus(gapi.auth2.getAuthInstance().isSignedIn.get());
+                }).catch(error => {
+                    console.error('初期化エラー:', error);
+                    alert('初期化に失敗しました: ' + JSON.stringify(error));
+                });
+            });
+        }
+
+        function updateSigninStatus(isSignedIn) {
+            document.body.className = isSignedIn ? 'signed-in' : '';
+        }
+
+        function signIn() {
+            gapi.auth2.getAuthInstance().signIn().catch(error => {
+                console.error('ログインエラー:', error);
+                alert('ログインに失敗しました: ' + JSON.stringify(error));
+            });
+        }
+
+        function uploadVideo() {
+            const fileInput = document.getElementById('videoFile');
+            const file = fileInput.files[0];
+            if (!file) {
+                alert('動画ファイルを選択してください');
+                return;
+            }
+
+            const metadata = {
+                snippet: {
+                    title: 'テスト動画',
+                    description: 'HTMLとJSでアップロードした動画',
+                    categoryId: '22' // People & Blogs
+                },
+                status: {
+                    privacyStatus: 'private'
+                }
+            };
+
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', 'https://www.googleapis.com/upload/youtube/v3/videos?part=snippet,status', true);
+            xhr.setRequestHeader('Authorization', 'Bearer ' + gapi.auth2.getAuthInstance().currentUser.get().getAuthResponse().access_token);
+            xhr.setRequestHeader('Content-Type', 'multipart/related; boundary=foo_bar_baz');
+
+            let body = '--foo_bar_baz\r\n';
+            body += 'Content-Type: application/json; charset=UTF-8\r\n\r\n';
+            body += JSON.stringify(metadata) + '\r\n';
+            body += '--foo_bar_baz\r\n';
+            body += 'Content-Type: ' + file.type + '\r\n';
+            body += 'Content-Transfer-Encoding: binary\r\n\r\n';
+
+            const reader = new FileReader();
+            reader.onload = () => {
+                body += reader.result + '\r\n';
+                body += '--foo_bar_baz--';
+                xhr.send(body);
+            };
+            reader.readAsBinaryString(file);
+
+            xhr.onload = () => {
+                if (xhr.status === 200) {
+                    alert('アップロード成功！');
+                    console.log(JSON.parse(xhr.responseText));
+                } else {
+                    alert('アップロード失敗: ' + xhr.statusText);
+                    console.error(xhr.responseText);
+                }
+            };
+            xhr.onerror = () => {
+                alert('ネットワークエラー');
+                console.error('ネットワークエラー');
+            };
+        }
+
+        initClient();
+    </script>
+</body>
+</html>

@@ -54,6 +54,7 @@
         const SCOPES = 'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube';
         const DISCOVERY_DOCS = ['https://www.googleapis.com/discovery/v1/apis/youtube/v3/rest'];
         let accessToken = null;
+        let tokenClient = null;
 
         // YouTube API クライアント初期化
         function initClient() {
@@ -75,7 +76,7 @@
 
         // Google ログイン処理
         function handleAuthClick() {
-            const client = google.accounts.oauth2.initTokenClient({
+            tokenClient = google.accounts.oauth2.initTokenClient({
                 client_id: CLIENT_ID,
                 scope: SCOPES,
                 callback: (response) => {
@@ -90,7 +91,7 @@
                     loadPlaylists();
                 }
             });
-            client.requestAccessToken();
+            tokenClient.requestAccessToken();
         }
 
         // ファイル名からタイトルを設定
@@ -98,7 +99,7 @@
             const videoFile = document.getElementById('videoFile').files[0];
             const titleInput = document.getElementById('videoTitle');
             if (document.getElementById('useFileName').checked && videoFile) {
-                titleInput.value = videoFile.name.replace(/\.[^/.]+$/, ''); // 拡張子を除去
+                titleInput.value = videoFile.name.replace(/\.[^/.]+$/, '');
             } else {
                 titleInput.value = '';
             }
@@ -158,6 +159,28 @@
             });
         }
 
+        // アクセストークンの更新
+        function ensureValidToken(callback) {
+            if (!tokenClient) {
+                alert('ログインセッションが無効です。再度ログインしてください。');
+                document.body.className = '';
+                return;
+            }
+            tokenClient.requestAccessToken({
+                prompt: '',
+                callback: (response) => {
+                    if (response.error) {
+                        console.error('トークン更新エラー:', JSON.stringify(response, null, 2));
+                        alert('トークンの更新に失敗しました: ' + JSON.stringify(response));
+                        return;
+                    }
+                    accessToken = response.access_token;
+                    console.log('トークン更新成功:', accessToken);
+                    callback();
+                }
+            });
+        }
+
         // 動画アップロード
         function uploadVideo() {
             const videoFile = document.getElementById('videoFile').files[0];
@@ -187,7 +210,6 @@
                 }
             };
 
-            // 動画アップロード
             const xhr = new XMLHttpRequest();
             xhr.open('POST', 'https://www.googleapis.com/upload/youtube/v3/videos?part=snippet,status', true);
             xhr.setRequestHeader('Authorization', 'Bearer ' + accessToken);
@@ -216,12 +238,12 @@
 
                     // サムネイルアップロード
                     if (thumbnailFile) {
-                        uploadThumbnail(videoId, thumbnailFile);
+                        ensureValidToken(() => uploadThumbnail(videoId, thumbnailFile));
                     }
 
                     // 再生リストに追加
                     if (playlistId) {
-                        addToPlaylist(videoId, playlistId);
+                        ensureValidToken(() => addToPlaylist(videoId, playlistId));
                     }
                 } else {
                     alert('動画アップロード失敗: ' + xhr.statusText);
@@ -229,36 +251,39 @@
                 }
             };
             xhr.onerror = () => {
-                alert('ネットワークエラー');
+                alert('動画ネットワークエラー');
                 console.error('ネットワークエラー');
             };
         }
 
         // サムネイルアップロード
         function uploadThumbnail(videoId, thumbnailFile) {
-            const xhr = new XMLHttpRequest();
-            xhr.open('POST', `https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=${videoId}`, true);
-            xhr.setRequestHeader('Authorization', 'Bearer ' + accessToken);
-            xhr.setRequestHeader('Content-Type', thumbnailFile.type);
+            if (thumbnailFile.size > 2 * 1024 * 1024) {
+                alert('サムネイルファイルが大きすぎます（最大 2MB）');
+                return;
+            }
 
-            const reader = new FileReader();
-            reader.onload = () => {
-                xhr.send(reader.result);
-            };
-            reader.readAsArrayBuffer(thumbnailFile);
+            const formData = new FormData();
+            formData.append('file', thumbnailFile);
+
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', `https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=${videoId}&uploadType=media`, true);
+            xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`);
 
             xhr.onload = () => {
                 if (xhr.status === 200) {
                     alert('サムネイルアップロード成功！');
+                    console.log('サムネイルアップロード応答:', xhr.responseText);
                 } else {
                     alert('サムネイルアップロード失敗: ' + xhr.statusText);
-                    console.error(xhr.responseText);
+                    console.error('サムネイルアップロードエラー:', xhr.responseText);
                 }
             };
             xhr.onerror = () => {
                 alert('サムネイルネットワークエラー');
-                console.error('ネットワークエラー');
+                console.error('サムネイルネットワークエラー:', xhr.statusText);
             };
+            xhr.send(formData);
         }
 
         // 再生リストに追加

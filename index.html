@@ -17,7 +17,7 @@
         
         <!-- ログイン前 -->
         <div id="preSignIn" class="pre-sign-in">
-            <button onclick="handleAuthClick()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded transition duration-200">Google ログイン</button>
+            <button id="signInButton" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded transition duration-200">Google ログイン</button>
             <p class="text-red-600 mt-2 text-sm">注: このアプリはテスト中のため、「このアプリは検証されていません」という警告が表示されます。「詳細を表示」>「続行」をクリックしてください。テストユーザー（例: a6068376@gmail.com）であることを確認してください。</p>
         </div>
 
@@ -79,6 +79,7 @@
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="https://apis.google.com/js/api.js"></script>
     <script>
+        console.log('スクリプト開始');
         const CLIENT_ID = '320694443306-u0g4k8vc7v6a3e2calbcq7r7jl40bqc4p.apps.googleusercontent.com';
         const API_KEY = 'AIzaSyBuV5V7kB3lI8EQtuQ7qB3q8J7QBkQjaM';
         const SCOPES = 'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube';
@@ -91,10 +92,11 @@
         let gapiInitialized = false;
         let ffmpegInitialized = false;
         let ffmpegInstance = null;
-        const DEFAULT_IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVQI12P4//8/AAX+Av7czFnnAAAAAElFTkSuQmCC'; // 黒背景
+        const DEFAULT_IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVQI12P4//8/AAX+Av7czFnnAAAAAElFTkSuQmCC';
         const MAX_INIT_RETRIES = 3;
 
         async function initFFmpeg() {
+            console.log('FFmpeg 初期化開始');
             for (let attempt = 1; attempt <= MAX_INIT_RETRIES; attempt++) {
                 try {
                     if (!window.FFmpeg) {
@@ -118,9 +120,13 @@
         }
 
         async function initGapiClient() {
+            console.log('gapi 初期化開始');
             for (let attempt = 1; attempt <= MAX_INIT_RETRIES; attempt++) {
                 try {
                     await new Promise((resolve, reject) => {
+                        if (typeof gapi === 'undefined') {
+                            reject(new Error('gapi がロードされていません'));
+                        }
                         gapi.load('client', {
                             callback: resolve,
                             onerror: () => reject(new Error('gapi.load 失敗'))
@@ -167,6 +173,11 @@
         }
 
         function handleAuthClick() {
+            console.log('handleAuthClick 実行');
+            if (!google || !google.accounts || !google.accounts.oauth2) {
+                showError('Google OAuth クライアントがロードされていません。');
+                return;
+            }
             tokenClient = google.accounts.oauth2.initTokenClient({
                 client_id: CLIENT_ID,
                 scope: SCOPES,
@@ -576,8 +587,19 @@
             });
         }
 
-        document.getElementById('mediaFiles').addEventListener('change', updateMediaInputs);
-        initClient();
+        // イベントリスナーの設定
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('DOM 読み込み完了');
+            const signInButton = document.getElementById('signInButton');
+            if (signInButton) {
+                signInButton.addEventListener('click', handleAuthClick);
+                console.log('サインインボタンにイベントリスナー設定');
+            } else {
+                console.error('サインインボタンが見つかりません');
+            }
+            document.getElementById('mediaFiles').addEventListener('change', updateMediaInputs);
+            initClient();
+        });
     </script>
 </body>
 </html>

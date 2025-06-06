@@ -74,7 +74,7 @@
         </div>
     </div>
 
-    <!-- FFmpeg.js CDN -->
+    <!-- FFmpeg.js と Google API スクリプト -->
     <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.min.js"></script>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="https://apis.google.com/js/api.js"></script>
@@ -88,24 +88,43 @@
         let mediaQueue = [];
         let currentUploadIndex = 0;
         let playlists = [];
+        let gapiInitialized = false;
         const ffmpeg = FFmpeg.createFFmpeg({ log: true });
         const DEFAULT_IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVQI12P4//8/AAX+Av7czFnnAAAAAElFTkSuQmCC'; // 黒背景
 
         async function initClient() {
-            await ffmpeg.load();
-            gapi.load('client', () => {
-                gapi.client.init({
+            try {
+                await ffmpeg.load();
+                console.log('FFmpeg ロード完了');
+                await new Promise((resolve, reject) => {
+                    gapi.load('client', {
+                        callback: resolve,
+                        onerror: () => reject(new Error('gapi.load 失敗'))
+                    });
+                });
+                console.log('gapi.load 完了');
+                await gapi.client.init({
                     apiKey: API_KEY,
                     discoveryDocs: DISCOVERY_DOCS
-                }).then(() => {
-                    console.log('YouTube API クライアント初期化完了');
-                    if (accessToken) {
-                        loadPlaylists();
-                    }
-                }).catch(error => {
-                    showError('YouTube API 初期化に失敗しました: ' + JSON.stringify(error));
                 });
-            });
+                console.log('YouTube API クライアント初期化完了');
+                gapiInitialized = true;
+                if (accessToken) {
+                    loadPlaylists();
+                }
+            } catch (error) {
+                showError('初期化エラー: ' + error.message);
+                console.error('初期化詳細:', JSON.stringify(error, null, 2));
+            }
+        }
+
+        function ensureClientInitialized(callback) {
+            if (gapiInitialized) {
+                callback();
+            } else {
+                showError('YouTube API が初期化されていません。リトライ中...');
+                setTimeout(() => initClient().then(callback), 1000);
+            }
         }
 
         function handleAuthClick() {
@@ -114,45 +133,69 @@
                 scope: SCOPES,
                 callback: (response) => {
                     if (response.error) {
-                        showError('認証に失敗しました: ' + JSON.stringify(response) + '\nテストユーザー（a6068376@gmail.com）であるか、「続行」を選択してください。');
+                        showError('認証エラー: ' + JSON.stringify(response) + '\nテストユーザー（a6068376@gmail.com）であるか、「続行」を選択してください。');
                         return;
                     }
                     accessToken = response.access_token;
                     document.body.classList.add('signed-in');
                     document.getElementById('preSignIn').classList.add('hidden');
                     document.getElementById('postSignIn').classList.remove('hidden');
-                    loadPlaylists();
+                    ensureClientInitialized(loadPlaylists);
                 }
             });
             tokenClient.requestAccessToken();
         }
 
         function loadPlaylists() {
-            gapi.client.youtube.playlists.list({
-                part: 'snippet',
-                mine: true,
-                maxResults: 50
-            }).then(response => {
-                playlists = response.result.items || [];
-                updateBulkPlaylistOptions();
-                updateMediaInputs();
-            }).catch(error => {
-                showError('再生リストの取得に失敗しました: ' + JSON.stringify(error));
+            ensureClientInitialized(() => {
+                if (!gapi.client.youtube) {
+                    showError('YouTube API サービスが利用できません。');
+                    return;
+                }
+                gapi.client.youtube.playlists.list({
+                    part: 'snippet',
+                    mine: true,
+                    maxResults: 50
+                }).then(response => {
+                    playlists = response.result.items || [];
+                    updateBulkPlaylistOptions();
+                    updateMediaInputs();
+                }).catch(error => {
+                    showError('再生リスト取得エラー: ' + JSON.stringify(error));
+                });
             });
         }
 
         function createPlaylist(title, callback) {
-            gapi.client.youtube.playlists.insert({
-                part: 'snippet,status',
-                resource: {
-                    snippet: { title, description: '自動作成された再生リスト' },
-                    status: { privacyStatus: 'private' }
+            ensureClientInitialized(() => {
+                if (!gapi.client.youtube) {
+                    showError('YouTube API サービスが利用できません。');
+                    return;
                 }
-            }).then(response => {
-                playlists.push(response.result);
-                callback(response.result.id);
-            }).catch(error => {
-                showError('再生リストの作成に失敗しました: ' + JSON.stringify(error));
+                gapi.client.youtube.playlists.insert({
+                    part: 'snippet,status',
+                    resource: {
+                        snippet: { title, description: '自動作成された再生リスト' },
+                        status: { privacyStatus: 'private' }
+                    }
+                }).then(response => {
+                    playlists.push(response.result);
+                    callback(response.result.id);
+                }).catch(error => {
+                    showError('再生リスト作成エラー: ' + JSON.stringify(error));
+                });
+            });
+        }
+
+        function createBulkPlaylist() {
+            const title = document.getElementById('bulkNewPlaylist').value;
+            if (!title) {
+                showError('再生リストのタイトルを入力してください');
+                return;
+            }
+            createPlaylist(title, (playlistId) => {
+                updateBulkPlaylistOptions();
+                document.getElementById('bulkPlaylist').value = playlistId;
             });
         }
 
@@ -168,7 +211,7 @@
                 prompt: '',
                 callback: (response) => {
                     if (response.error) {
-                        showError('トークンの更新に失敗しました: ' + JSON.stringify(response));
+                        showError('トークン更新エラー: ' + JSON.stringify(response));
                         return;
                     }
                     accessToken = response.access_token;
@@ -193,18 +236,6 @@
         function updateBulkPlaylistOptions() {
             const bulkPlaylist = document.getElementById('bulkPlaylist');
             bulkPlaylist.innerHTML = '<option value="">なし</option>' + playlists.map(p => `<option value="${p.id}">${p.snippet.title}</option>`).join('');
-        }
-
-        function createBulkPlaylist() {
-            const title = document.getElementById('bulkNewPlaylist').value;
-            if (!title) {
-                showError('再生リストのタイトルを入力してください');
-                return;
-            }
-            createPlaylist(title, (playlistId) => {
-                updateBulkPlaylistOptions();
-                document.getElementById('bulkPlaylist').value = playlistId;
-            });
         }
 
         async function convertAudioToVideo(audioFile, thumbnailFile) {
@@ -238,13 +269,10 @@
                 showError(`音声変換失敗: ${audioFile.name} (${error.message})`);
                 return null;
             } finally {
-                ffmpeg.FS('unlink', 'output.mp4');
-                if (ffmpeg.FS('readdir', '/').includes(`input.${audioFile.name.split('.').pop().toLowerCase()}`)) {
-                    ffmpeg.FS('unlink', `input.${audioFile.name.split('.').pop().toLowerCase()}`);
-                }
-                if (ffmpeg.FS('readdir', '/').includes(`image.${thumbnailFile ? thumbnailFile.name.split('.').pop().toLowerCase() : 'png'}`)) {
-                    ffmpeg.FS('unlink', `image.${thumbnailFile ? thumbnailFile.name.split('.').pop().toLowerCase() : 'png'}`);
-                }
+                ['output.mp4', `input.${audioFile.name.split('.').pop().toLowerCase()}`, `image.${thumbnailFile ? thumbnailFile.name.split('.').pop().toLowerCase() : 'png'}`]
+                    .forEach(file => {
+                        if (ffmpeg.FS('readdir', '/').includes(file)) ffmpeg.FS('unlink', file);
+                    });
             }
         }
 
@@ -349,7 +377,6 @@
                 if (bulkPlaylist) {
                     document.getElementById(`playlist${index}`).value = bulkPlaylist;
                 }
-                // サムネイルは手動で適用（input の再設定は困難）
             });
         }
 
@@ -483,19 +510,25 @@
         }
 
         function addToPlaylist(videoId, playlistId) {
-            ensureValidToken(() => {
-                gapi.client.youtube.playlistItems.insert({
-                    part: 'snippet',
-                    resource: {
-                        snippet: {
-                            playlistId: playlistId,
-                            resourceId: { kind: 'youtube#video', videoId }
+            ensureClientInitialized(() => {
+                if (!gapi.client.youtube) {
+                    showError('YouTube API サービスが利用できません。');
+                    return;
+                }
+                ensureValidToken(() => {
+                    gapi.client.youtube.playlistItems.insert({
+                        part: 'snippet',
+                        resource: {
+                            snippet: {
+                                playlistId: playlistId,
+                                resourceId: { kind: 'youtube#video', videoId }
+                            }
                         }
-                    }
-                }).then(() => {
-                    console.log(`再生リストに追加: ${videoId}`);
-                }).catch(error => {
-                    showError('再生リストへの追加に失敗しました: ' + JSON.stringify(error));
+                    }).then(() => {
+                        console.log(`再生リストに追加: ${videoId}`);
+                    }).catch(error => {
+                        showError('再生リスト追加エラー: ' + JSON.stringify(error));
+                    });
                 });
             });
         }

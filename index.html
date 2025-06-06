@@ -75,466 +75,541 @@
     </div>
 
     <!-- FFmpeg.js と Google API スクリプト -->
-    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@ffmpegdev/ffmpeg-js@7.0.0-rc7/dist/umd7/ffmpeg.min.js"></script>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="https://apis.google.com/js/api.js"></script>
     <script>
-        const CLIENT_ID = '320694642206-n0gk8vc7v6a3e2calbcp7r3jl50bic5p.apps.googleusercontent.com';
-        const API_KEY = 'AIzaSyCtUAPx02UxgEQtJzYcbRA1rJd5vi5AjaM';
-        const SCOPES = 'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube';
-        const DISCOVERY_DOCS = ['https://www.googleapis.com/discovery/v1/apis/youtube/v3/rest'];
-        let accessToken = null;
-        let tokenClient = null;
-        let mediaQueue = [];
-        let currentUploadIndex = 0;
-        let playlists = [];
-        let gapiInitialized = false;
-        const ffmpeg = FFmpeg.createFFmpeg({ log: true });
-        const DEFAULT_IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVQI12P4//8/AAX+Av7czFnnAAAAAElFTkSuQmCC'; // 黒背景
+        try {
+            console.log('スクリプト開始');
 
-        async function initClient() {
-            try {
-                await ffmpeg.load();
-                console.log('FFmpeg ロード完了');
-                await new Promise((resolve, reject) => {
-                    gapi.load('client', {
-                        callback: resolve,
-                        onerror: () => reject(new Error('gapi.load 失敗'))
-                    });
-                });
-                console.log('gapi.load 完了');
-                await gapi.client.init({
-                    apiKey: API_KEY,
-                    discoveryDocs: DISCOVERY_DOCS
-                });
-                console.log('YouTube API クライアント初期化完了');
-                gapiInitialized = true;
-                if (accessToken) {
-                    loadPlaylists();
-                }
-            } catch (error) {
-                showError('初期化エラー: ' + error.message);
-                console.error('初期化詳細:', JSON.stringify(error, null, 2));
-            }
-        }
+            const CLIENT_ID = '320694443306-u0g4k8vc7v6a3e2calbcq7r7jl40bqc4p.apps.googleusercontent.com';
+            const API_KEY = 'AIzaSyBuV5V7kB3lI8EQtuQ7qB3q8J7QBkQjaM';
+            const SCOPES = 'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube';
+            const DISCOVERY_DOCS = ['https://www.googleapis.com/discovery/v1/apis/youtube/v3/rest'];
+            let accessToken = null;
+            let tokenClient = null;
+            let mediaQueue = [];
+            let currentUploadIndex = 0;
+            let playlists = [];
+            let gapiInitialized = false;
+            let ffmpegInitialized = false;
+            let ffmpegInstance = null;
+            const DEFAULT_IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVQI12P4//8/AAX+Av7czFnnAAAAAElFTkSuQmCC';
+            const MAX_INIT_RETRIES = 3;
 
-        function ensureClientInitialized(callback) {
-            if (gapiInitialized) {
-                callback();
-            } else {
-                showError('YouTube API が初期化されていません。リトライ中...');
-                setTimeout(() => initClient().then(callback), 1000);
-            }
-        }
-
-        function handleAuthClick() {
-            tokenClient = google.accounts.oauth2.initTokenClient({
-                client_id: CLIENT_ID,
-                scope: SCOPES,
-                callback: (response) => {
-                    if (response.error) {
-                        showError('認証エラー: ' + JSON.stringify(response) + '\nテストユーザー（a6068376@gmail.com）であるか、「続行」を選択してください。');
-                        return;
-                    }
-                    accessToken = response.access_token;
-                    document.body.classList.add('signed-in');
-                    document.getElementById('preSignIn').classList.add('hidden');
-                    document.getElementById('postSignIn').classList.remove('hidden');
-                    ensureClientInitialized(loadPlaylists);
-                }
-            });
-            tokenClient.requestAccessToken();
-        }
-
-        function loadPlaylists() {
-            ensureClientInitialized(() => {
-                if (!gapi.client.youtube) {
-                    showError('YouTube API サービスが利用できません。');
+            window.handleAuthClick = function() {
+                console.log('handleAuthClick 実行');
+                if (!window.google || !window.google.accounts || !window.google.accounts.oauth2) {
+                    showError('Google OAuth クライアントがロードされていません。ネットワークを確認し、ページをリロードしてください。');
                     return;
                 }
-                gapi.client.youtube.playlists.list({
-                    part: 'snippet',
-                    mine: true,
-                    maxResults: 50
-                }).then(response => {
-                    playlists = response.result.items || [];
-                    updateBulkPlaylistOptions();
-                    updateMediaInputs();
-                }).catch(error => {
-                    showError('再生リスト取得エラー: ' + JSON.stringify(error));
-                });
-            });
-        }
-
-        function createPlaylist(title, callback) {
-            ensureClientInitialized(() => {
-                if (!gapi.client.youtube) {
-                    showError('YouTube API サービスが利用できません。');
-                    return;
-                }
-                gapi.client.youtube.playlists.insert({
-                    part: 'snippet,status',
-                    resource: {
-                        snippet: { title, description: '自動作成された再生リスト' },
-                        status: { privacyStatus: 'private' }
+                tokenClient = google.accounts.oauth2.initTokenClient({
+                    client_id: CLIENT_ID,
+                    scope: SCOPES,
+                    callback: (response) => {
+                        if (response.error) {
+                            showError('認証エラー: ' + JSON.stringify(response) + '\nテストユーザー（a6068376@gmail.com）であるか、「続行」を選択してください。');
+                            return;
+                        }
+                        accessToken = response.access_token;
+                        document.body.classList.add('signed-in');
+                        document.getElementById('preSignIn').classList.add('hidden');
+                        document.getElementById('postSignIn').classList.remove('hidden');
+                        ensureClientInitialized(loadPlaylists);
                     }
-                }).then(response => {
-                    playlists.push(response.result);
-                    callback(response.result.id);
-                }).catch(error => {
-                    showError('再生リスト作成エラー: ' + JSON.stringify(error));
                 });
-            });
-        }
-
-        function createBulkPlaylist() {
-            const title = document.getElementById('bulkNewPlaylist').value;
-            if (!title) {
-                showError('再生リストのタイトルを入力してください');
-                return;
-            }
-            createPlaylist(title, (playlistId) => {
-                updateBulkPlaylistOptions();
-                document.getElementById('bulkPlaylist').value = playlistId;
-            });
-        }
-
-        function ensureValidToken(callback) {
-            if (!tokenClient) {
-                showError('ログインセッションが無効です。再度ログインしてください。');
-                document.body.classList.remove('signed-in');
-                document.getElementById('preSignIn').classList.remove('hidden');
-                document.getElementById('postSignIn').classList.add('hidden');
-                return;
-            }
-            tokenClient.requestAccessToken({
-                prompt: '',
-                callback: (response) => {
-                    if (response.error) {
-                        showError('トークン更新エラー: ' + JSON.stringify(response));
-                        return;
-                    }
-                    accessToken = response.access_token;
-                    callback();
-                }
-            });
-        }
-
-        function showError(message) {
-            const errorContainer = document.getElementById('errorContainer');
-            errorContainer.classList.remove('hidden');
-            errorContainer.innerHTML += `<p class="error-message">${message}</p>`;
-            console.error(message);
-        }
-
-        function clearErrors() {
-            const errorContainer = document.getElementById('errorContainer');
-            errorContainer.classList.add('hidden');
-            errorContainer.innerHTML = '';
-        }
-
-        function updateBulkPlaylistOptions() {
-            const bulkPlaylist = document.getElementById('bulkPlaylist');
-            bulkPlaylist.innerHTML = '<option value="">なし</option>' + playlists.map(p => `<option value="${p.id}">${p.snippet.title}</option>`).join('');
-        }
-
-        async function convertAudioToVideo(audioFile, thumbnailFile) {
-            document.getElementById('progressText').textContent = `音声変換中: ${audioFile.name}`;
-            document.getElementById('progressContainer').classList.remove('hidden');
-
-            try {
-                const audioData = await audioFile.arrayBuffer();
-                const imageData = thumbnailFile ? await thumbnailFile.arrayBuffer() : await (await fetch(DEFAULT_IMAGE)).arrayBuffer();
-                const audioExt = audioFile.name.split('.').pop().toLowerCase();
-                const imageExt = thumbnailFile ? thumbnailFile.name.split('.').pop().toLowerCase() : 'png';
-
-                await ffmpeg.FS('writeFile', `input.${audioExt}`, new Uint8Array(audioData));
-                await ffmpeg.FS('writeFile', `image.${imageExt}`, new Uint8Array(imageData));
-
-                await ffmpeg.run(
-                    '-i', `input.${audioExt}`,
-                    '-loop', '1',
-                    '-i', `image.${imageExt}`,
-                    '-c:a', 'aac',
-                    '-c:v', 'libx264',
-                    '-shortest',
-                    '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2',
-                    'output.mp4'
-                );
-
-                const videoData = ffmpeg.FS('readFile', 'output.mp4');
-                const videoBlob = new Blob([videoData.buffer], { type: 'video/mp4' });
-                return new File([videoBlob], `${audioFile.name.replace(/\.[^/.]+$/, '')}.mp4`, { type: 'video/mp4' });
-            } catch (error) {
-                showError(`音声変換失敗: ${audioFile.name} (${error.message})`);
-                return null;
-            } finally {
-                ['output.mp4', `input.${audioFile.name.split('.').pop().toLowerCase()}`, `image.${thumbnailFile ? thumbnailFile.name.split('.').pop().toLowerCase() : 'png'}`]
-                    .forEach(file => {
-                        if (ffmpeg.FS('readdir', '/').includes(file)) ffmpeg.FS('unlink', file);
-                    });
-            }
-        }
-
-        async function updateMediaInputs() {
-            const mediaFiles = document.getElementById('mediaFiles').files;
-            const mediaList = document.getElementById('mediaList');
-            mediaList.innerHTML = '';
-            mediaQueue = [];
-
-            if (mediaFiles.length === 0) {
-                document.getElementById('uploadButton').disabled = true;
-                return;
-            }
-
-            for (let i = 0; i < mediaFiles.length; i++) {
-                const file = mediaFiles[i];
-                let mediaFile = file;
-                if (file.type.startsWith('audio/')) {
-                    const thumbnailFile = document.getElementById(`thumbnail${i}`)?.files[0] || document.getElementById('bulkThumbnail')?.files[0];
-                    mediaFile = await convertAudioToVideo(file, thumbnailFile);
-                    if (!mediaFile) continue;
-                }
-                const div = document.createElement('div');
-                div.className = 'bg-gray-50 dark:bg-gray-700 p-4 rounded-lg shadow';
-                div.innerHTML = `
-                    <h3 class="text-lg font-semibold mb-2">${mediaFile.name}</h3>
-                    <div class="grid grid-cols-1 gap-4">
-                        <div>
-                            <label class="block text-sm font-medium">タイトル:</label>
-                            <input type="text" id="title${i}" value="${mediaFile.name.replace(/\.[^/.]+$/, '')}" class="w-full border rounded p-2 bg-white dark:bg-gray-600">
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium">概要:</label>
-                            <textarea id="description${i}" class="w-full border rounded p-2 bg-white dark:bg-gray-600" rows="3"></textarea>
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium">公開設定:</label>
-                            <select id="privacy${i}" class="w-full border rounded p-2 bg-white dark:bg-gray-600">
-                                <option value="private">非公開</option>
-                                <option value="unlisted">限定公開</option>
-                                <option value="public">公開</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium">サムネイル:</label>
-                            <input type="file" id="thumbnail${i}" accept="image/jpeg,image/png" class="w-full border rounded p-2 bg-white dark:bg-gray-600">
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium">再生リスト:</label>
-                            <select id="playlist${i}" class="w-full border rounded p-2 bg-white dark:bg-gray-600">
-                                <option value="">なし</option>
-                                ${playlists.map(p => `<option value="${p.id}">${p.snippet.title}</option>`).join('')}
-                            </select>
-                            <input type="text" id="newPlaylist${i}" placeholder="新しい再生リストのタイトル" class="w-full border rounded p-2 mt-2 bg-white dark:bg-gray-600">
-                            <button onclick="createNewPlaylist(${i})" class="mt-2 bg-blue-600 hover:bg-blue-700 text-white py-1 px-3 rounded">新規作成</button>
-                        </div>
-                    </div>
-                `;
-                mediaList.appendChild(div);
-                mediaQueue.push({ file: mediaFile, index: i });
-            }
-
-            document.getElementById('uploadButton').disabled = mediaQueue.length === 0;
-        }
-
-        function createNewPlaylist(index) {
-            const title = document.getElementById(`newPlaylist${index}`).value;
-            if (!title) {
-                showError('再生リストのタイトルを入力してください');
-                return;
-            }
-            createPlaylist(title, (playlistId) => {
-                const select = document.getElementById(`playlist${index}`);
-                const option = document.createElement('option');
-                option.value = playlistId;
-                option.text = title;
-                select.appendChild(option);
-                select.value = playlistId;
-            });
-        }
-
-        function applyBulkSettings() {
-            const bulkTitle = document.getElementById('bulkTitle').value;
-            const bulkDescription = document.getElementById('bulkDescription').value;
-            const bulkPrivacy = document.getElementById('bulkPrivacy').value;
-            const bulkThumbnail = document.getElementById('bulkThumbnail').files[0];
-            const bulkPlaylist = document.getElementById('bulkPlaylist').value;
-
-            mediaQueue.forEach(({ index }, i) => {
-                if (bulkTitle) {
-                    const title = bulkTitle
-                        .replace('{filename}', mediaQueue[index].file.name.replace(/\.[^/.]+$/, ''))
-                        .replace('{index}', i + 1);
-                    document.getElementById(`title${index}`).value = title;
-                }
-                if (bulkDescription) {
-                    document.getElementById(`description${index}`).value = bulkDescription;
-                }
-                if (bulkPrivacy) {
-                    document.getElementById(`privacy${index}`).value = bulkPrivacy;
-                }
-                if (bulkPlaylist) {
-                    document.getElementById(`playlist${index}`).value = bulkPlaylist;
-                }
-            });
-        }
-
-        function startUpload() {
-            if (mediaQueue.length === 0) {
-                showError('メディアファイルが選択されていません');
-                return;
-            }
-            clearErrors();
-            currentUploadIndex = 0;
-            document.getElementById('progressContainer').classList.remove('hidden');
-            document.getElementById('uploadButton').disabled = true;
-            uploadNextMedia();
-        }
-
-        function uploadNextMedia() {
-            if (currentUploadIndex >= mediaQueue.length) {
-                document.getElementById('progressText').textContent = 'すべてのアップロードが完了しました！';
-                document.getElementById('progressBar').style.width = '100%';
-                document.getElementById('uploadButton').disabled = false;
-                return;
-            }
-
-            const { file, index } = mediaQueue[currentUploadIndex];
-            const title = document.getElementById(`title${index}`).value || 'テスト動画';
-            const description = document.getElementById(`description${index}`).value || 'HTMLとJSでアップロード';
-            const privacyStatus = document.getElementById(`privacy${index}`).value;
-            const thumbnailFile = document.getElementById(`thumbnail${index}`).files[0] || document.getElementById('bulkThumbnail').files[0];
-            const playlistId = document.getElementById(`playlist${index}`).value;
-
-            document.getElementById('progressText').textContent = `アップロード中: ${file.name} (${currentUploadIndex + 1}/${mediaQueue.length})`;
-            document.getElementById('progressBar').style.width = `${(currentUploadIndex / mediaQueue.length) * 100}%`;
-
-            if (file.size > 128 * 1024 * 1024) {
-                showError(`ファイルが大きすぎます: ${file.name}（最大 128MB）`);
-                currentUploadIndex++;
-                uploadNextMedia();
-                return;
-            }
-
-            const metadata = {
-                snippet: { title, description, categoryId: '22' },
-                status: { privacyStatus }
+                tokenClient.requestAccessToken();
             };
+            console.log('handleAuthClick 定義完了');
 
-            const formData = new FormData();
-            formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-            formData.append('media', file);
-
-            ensureValidToken(() => {
-                const xhr = new XMLHttpRequest();
-                xhr.open('POST', 'https://www.googleapis.com/upload/youtube/v3/videos?part=snippet,status&uploadType=multipart', true);
-                xhr.setRequestHeader('Authorization', 'Bearer ' + accessToken);
-
-                xhr.upload.onprogress = (event) => {
-                    if (event.lengthComputable) {
-                        const percent = (event.loaded / event.total) * 100;
-                        console.log(`アップロード進捗 (${file.name}): ${percent.toFixed(2)}%`);
+            async function initFFmpeg() {
+                console.log('FFmpeg 初期化開始');
+                for (let attempt = 1; attempt <= MAX_INIT_RETRIES; attempt++) {
+                    try {
+                        if (!window.FFmpeg) {
+                            throw new Error('FFmpeg.js がロードされていません');
+                        }
+                        if (!ffmpegInstance) {
+                            ffmpegInstance = window.FFmpeg.createFFmpeg({ log: true });
+                        }
+                        await ffmpegInstance.load();
+                        ffmpegInitialized = true;
+                        console.log('FFmpeg 初期化完了');
+                        return;
+                    } catch (error) {
+                        console.warn(`FFmpeg 初期化試行 ${attempt}/${MAX_INIT_RETRIES} 失敗:`, error);
+                        if (attempt === MAX_INIT_RETRIES) {
+                            throw new Error(`FFmpeg 初期化に失敗しました: ${error.message}`);
+                        }
+                        await new Promise(resolve => setTimeout(resolve, 1000));
                     }
-                };
+                }
+            }
 
-                xhr.onload = () => {
-                    if (xhr.status === 200) {
-                        const response = JSON.parse(xhr.responseText);
-                        const videoId = response.id;
-                        console.log(`アップロード成功: ${file.name}, ビデオ ID: ${videoId}`);
-
-                        if (thumbnailFile) {
-                            uploadThumbnail(videoId, thumbnailFile);
-                        }
-
-                        if (playlistId) {
-                            addToPlaylist(videoId, playlistId);
-                        }
-
-                        currentUploadIndex++;
-                        document.getElementById('progressBar').style.width = `${((currentUploadIndex) / mediaQueue.length) * 100}%`;
-                        uploadNextMedia();
-                    } else {
-                        let errorMsg = xhr.responseText || '不明なエラー';
-                        try {
-                            const errorJson = JSON.parse(errorMsg);
-                            if (errorJson.error && errorJson.error.reason === 'uploadLimitExceeded') {
-                                errorMsg = `YouTube のアップロード制限に達しました: ${file.name}。電話番号を検証するか、別のアカウントを試してください。`;
+            async function initGapiClient() {
+                console.log('gapi 初期化開始');
+                for (let attempt = 1; attempt <= MAX_INIT_RETRIES; attempt++) {
+                    try {
+                        await new Promise((resolve, reject) => {
+                            if (typeof gapi === 'undefined') {
+                                reject(new Error('gapi がロードされていません'));
                             }
-                        } catch (e) {}
-                        showError(`アップロード失敗 (${file.name}): ${xhr.status} ${xhr.statusText}\n詳細: ${errorMsg}`);
-                        currentUploadIndex++;
-                        uploadNextMedia();
+                            gapi.load('client', {
+                                callback: resolve,
+                                onerror: () => reject(new Error('gapi.load 失敗'))
+                            });
+                        });
+                        console.log('gapi.load 完了');
+                        await gapi.client.init({
+                            apiKey: API_KEY,
+                            discoveryDocs: DISCOVERY_DOCS
+                        });
+                        gapiInitialized = true;
+                        console.log('YouTube API クライアント初期化完了');
+                        return;
+                    } catch (error) {
+                        console.warn(`gapi 初期化試行 ${attempt}/${MAX_INIT_RETRIES} 失敗:`, error);
+                        if (attempt === MAX_INIT_RETRIES) {
+                            throw new Error(`YouTube API 初期化に失敗しました: ${error.message}`);
+                        }
+                        await new Promise(resolve => setTimeout(resolve, 1000));
                     }
-                };
+                }
+            }
 
-                xhr.onerror = () => {
-                    showError(`ネットワークエラー: ${file.name}`);
+            async function initClient() {
+                try {
+                    await initFFmpeg();
+                    await initGapiClient();
+                    if (accessToken) {
+                        loadPlaylists();
+                    }
+                } catch (error) {
+                    showError(`初期化エラー: ${error.message}`);
+                    console.error('初期化詳細:', error);
+                }
+            }
+
+            function ensureClientInitialized(callback) {
+                if (gapiInitialized && ffmpegInitialized) {
+                    callback();
+                } else {
+                    showError('API 初期化中です。しばらくお待ちください...');
+                    initClient().then(callback);
+                }
+            }
+
+            function loadPlaylists() {
+                ensureClientInitialized(() => {
+                    if (!gapi.client.youtube) {
+                        showError('YouTube API サービスが利用できません。');
+                        return;
+                    }
+                    gapi.client.youtube.playlists.list({
+                        part: 'snippet',
+                        mine: true,
+                        maxResults: 50
+                    }).then(response => {
+                        playlists = response.result.items || [];
+                        updateBulkPlaylistOptions();
+                        updateMediaInputs();
+                    }).catch(error => {
+                        showError('再生リスト取得エラー: ' + JSON.stringify(error));
+                    });
+                });
+            }
+
+            function createPlaylist(title, callback) {
+                ensureClientInitialized(() => {
+                    if (!gapi.client.youtube) {
+                        showError('YouTube API サービスが利用できません。');
+                        return;
+                    }
+                    gapi.client.youtube.playlists.insert({
+                        part: 'snippet,status',
+                        resource: {
+                            snippet: { title, description: '自動作成された再生リスト' },
+                            status: { privacyStatus: 'private' }
+                        }
+                    }).then(response => {
+                        playlists.push(response.result);
+                        callback(response.result.id);
+                    }).catch(error => {
+                        showError('再生リスト作成エラー: ' + JSON.stringify(error));
+                    });
+                });
+            }
+
+            function createBulkPlaylist() {
+                const title = document.getElementById('bulkNewPlaylist').value;
+                if (!title) {
+                    showError('再生リストのタイトルを入力してください');
+                    return;
+                }
+                createPlaylist(title, (playlistId) => {
+                    updateBulkPlaylistOptions();
+                    document.getElementById('bulkPlaylist').value = playlistId;
+                });
+            }
+
+            function ensureValidToken(callback) {
+                if (!tokenClient) {
+                    showError('ログインセッションが無効です。再度ログインしてください。');
+                    document.body.classList.remove('signed-in');
+                    document.getElementById('preSignIn').classList.remove('hidden');
+                    document.getElementById('postSignIn').classList.add('hidden');
+                    return;
+                }
+                tokenClient.requestAccessToken({
+                    prompt: '',
+                    callback: (response) => {
+                        if (response.error) {
+                            showError('トークン更新エラー: ' + JSON.stringify(response));
+                            return;
+                        }
+                        accessToken = response.access_token;
+                        callback();
+                    }
+                });
+            }
+
+            function showError(message) {
+                const errorContainer = document.getElementById('errorContainer');
+                errorContainer.classList.remove('hidden');
+                errorContainer.innerHTML += `<p class="error-message">${message}</p>`;
+                console.error(message);
+            }
+
+            function clearErrors() {
+                const errorContainer = document.getElementById('errorContainer');
+                errorContainer.classList.add('hidden');
+                errorContainer.innerHTML = '';
+            }
+
+            function updateBulkPlaylistOptions() {
+                const bulkPlaylist = document.getElementById('bulkPlaylist');
+                bulkPlaylist.innerHTML = '<option value="">なし</option>' + playlists.map(p => `<option value="${p.id}">${p.snippet.title}</option>`).join('');
+            }
+
+            async function convertAudioToVideo(audioFile, thumbnailFile) {
+                if (!ffmpegInitialized || !ffmpegInstance) {
+                    showError('FFmpeg が初期化されていません。');
+                    return null;
+                }
+                document.getElementById('progressText').textContent = `音声変換中: ${audioFile.name}`;
+                document.getElementById('progressContainer').classList.remove('hidden');
+
+                try {
+                    const audioData = await audioFile.arrayBuffer();
+                    const imageData = thumbnailFile ? await thumbnailFile.arrayBuffer() : await (await fetch(DEFAULT_IMAGE)).arrayBuffer();
+                    const audioExt = audioFile.name.split('.').pop().toLowerCase();
+                    const imageExt = thumbnailFile ? thumbnailFile.name.split('.').pop().toLowerCase() : 'png';
+
+                    await ffmpegInstance.FS('writeFile', `input.${audioExt}`, new Uint8Array(audioData));
+                    await ffmpegInstance.FS('writeFile', `image.${imageExt}`, new Uint8Array(imageData));
+
+                    await ffmpegInstance.run(
+                        '-i', `input.${audioExt}`,
+                        '-loop', '1',
+                        '-i', `image.${imageExt}`,
+                        '-c:a', 'aac',
+                        '-c:v', 'libx264',
+                        '-shortest',
+                        '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2',
+                        'output.mp4'
+                    );
+
+                    const videoData = ffmpegInstance.FS('readFile', 'output.mp4');
+                    const videoBlob = new Blob([videoData.buffer], { type: 'video/mp4' });
+                    return new File([videoBlob], `${audioFile.name.replace(/\.[^/.]+$/, '')}.mp4`, { type: 'video/mp4' });
+                } catch (error) {
+                    showError(`音声変換失敗: ${audioFile.name} (${error.message})`);
+                    return null;
+                } finally {
+                    ['output.mp4', `input.${audioFile.name.split('.').pop().toLowerCase()}`, `image.${thumbnailFile ? thumbnailFile.name.split('.').pop().toLowerCase() : 'png'}`]
+                        .forEach(file => {
+                            if (ffmpegInstance && ffmpegInstance.FS('readdir', '/').includes(file)) ffmpegInstance.FS('unlink', file);
+                        });
+                }
+            }
+
+            async function updateMediaInputs() {
+                const mediaFiles = document.getElementById('mediaFiles').files;
+                const mediaList = document.getElementById('mediaList');
+                mediaList.innerHTML = '';
+                mediaQueue = [];
+
+                if (mediaFiles.length === 0) {
+                    document.getElementById('uploadButton').disabled = true;
+                    return;
+                }
+
+                for (let i = 0; i < mediaFiles.length; i++) {
+                    const file = mediaFiles[i];
+                    let mediaFile = file;
+                    if (file.type.startsWith('audio/')) {
+                        const thumbnailFile = document.getElementById(`thumbnail${i}`)?.files[0] || document.getElementById('bulkThumbnail')?.files[0];
+                        mediaFile = await convertAudioToVideo(file, thumbnailFile);
+                        if (!mediaFile) continue;
+                    }
+                    const div = document.createElement('div');
+                    div.className = 'bg-gray-50 dark:bg-gray-700 p-4 rounded-lg shadow';
+                    div.innerHTML = `
+                        <h3 class="text-lg font-semibold mb-2">${mediaFile.name}</h3>
+                        <div class="grid grid-cols-1 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium">タイトル:</label>
+                                <input type="text" id="title${i}" value="${mediaFile.name.replace(/\.[^/.]+$/, '')}" class="w-full border rounded p-2 bg-white dark:bg-gray-600">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium">概要:</label>
+                                <textarea id="description${i}" class="w-full border rounded p-2 bg-white dark:bg-gray-600" rows="3"></textarea>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium">公開設定:</label>
+                                <select id="privacy${i}" class="w-full border rounded p-2 bg-white dark:bg-gray-600">
+                                    <option value="private">非公開</option>
+                                    <option value="unlisted">限定公開</option>
+                                    <option value="public">公開</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium">サムネイル:</label>
+                                <input type="file" id="thumbnail${i}" accept="image/jpeg,image/png" class="w-full border rounded p-2 bg-white dark:bg-gray-600">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium">再生リスト:</label>
+                                <select id="playlist${i}" class="w-full border rounded p-2 bg-white dark:bg-gray-600">
+                                    <option value="">なし</option>
+                                    ${playlists.map(p => `<option value="${p.id}">${p.snippet.title}</option>`).join('')}
+                                </select>
+                                <input type="text" id="newPlaylist${i}" placeholder="新しい再生リストのタイトル" class="w-full border rounded p-2 mt-2 bg-white dark:bg-gray-600">
+                                <button onclick="createNewPlaylist(${i})" class="mt-2 bg-blue-600 hover:bg-blue-700 text-white py-1 px-3 rounded">新規作成</button>
+                            </div>
+                        </div>
+                    `;
+                    mediaList.appendChild(div);
+                    mediaQueue.push({ file: mediaFile, index: i });
+                }
+
+                document.getElementById('uploadButton').disabled = mediaQueue.length === 0;
+            }
+
+            function createNewPlaylist(index) {
+                const title = document.getElementById(`newPlaylist${index}`).value;
+                if (!title) {
+                    showError('再生リストのタイトルを入力してください');
+                    return;
+                }
+                createPlaylist(title, (playlistId) => {
+                    const select = document.getElementById(`playlist${index}`);
+                    const option = document.createElement('option');
+                    option.value = playlistId;
+                    option.text = title;
+                    select.appendChild(option);
+                    select.value = playlistId;
+                });
+            }
+
+            function applyBulkSettings() {
+                const bulkTitle = document.getElementById('bulkTitle').value;
+                const bulkDescription = document.getElementById('bulkDescription').value;
+                const bulkPrivacy = document.getElementById('bulkPrivacy').value;
+                const bulkThumbnail = document.getElementById('bulkThumbnail').files[0];
+                const bulkPlaylist = document.getElementById('bulkPlaylist').value;
+
+                mediaQueue.forEach(({ index }, i) => {
+                    if (bulkTitle) {
+                        const title = bulkTitle
+                            .replace('{filename}', mediaQueue[index].file.name.replace(/\.[^/.]+$/, ''))
+                            .replace('{index}', i + 1);
+                        document.getElementById(`title${index}`).value = title;
+                    }
+                    if (bulkDescription) {
+                        document.getElementById(`description${index}`).value = bulkDescription;
+                    }
+                    if (bulkPrivacy) {
+                        document.getElementById(`privacy${index}`).value = bulkPrivacy;
+                    }
+                    if (bulkPlaylist) {
+                        document.getElementById(`playlist${index}`).value = bulkPlaylist;
+                    }
+                });
+            }
+
+            function startUpload() {
+                if (mediaQueue.length === 0) {
+                    showError('メディアファイルがありません');
+                    return;
+                }
+                clearErrors();
+                currentUploadIndex = 0;
+                document.getElementById('progressContainer').classList.remove('hidden');
+                document.getElementById('uploadButton').disabled = true;
+                uploadNextMedia();
+            }
+
+            function uploadNextMedia() {
+                if (currentUploadIndex >= mediaQueue.length) {
+                    document.getElementById('progressText').textContent = 'すべてのアップロードが完了しました！';
+                    document.getElementById('progressBar').style.width = '100%';
+                    document.getElementById('uploadButton').disabled = false;
+                    return;
+                }
+
+                const { file, index } = mediaQueue[currentUploadIndex];
+                const title = document.getElementById(`title${index}`).value || 'default';
+                const description = document.getElementById(`description${index}`).value || 'HTMLとJSでアップロード';
+                const privacyStatus = document.getElementById('privacy${index}').value;
+                const thumbnailFile = document.getElementById(`thumbnail${index}`).files[0] || document.getElementById('bulkThumbnail').files[0];
+                const playlistId = document.getElementById('playlist${index}').value;
+
+                document.getElementById('progressText').textContent = `アップロード中: ${file.name} (${currentUploadIndex + 1}/${mediaQueue.length})`;
+                document.getElementById('progressBar').style.width = `${(currentUploadIndex / mediaQueue.length) * 100}%`;
+
+                if (file.size > 128 * 1024 * 1024) {
+                    showError(`ファイルサイズが大きすぎます: ${file.name}（最大128MB）`);
                     currentUploadIndex++;
                     uploadNextMedia();
-                };
-
-                xhr.send(formData);
-            });
-        }
-
-        function uploadThumbnail(videoId, thumbnailFile) {
-            if (thumbnailFile.size > 2 * 1024 * 1024) {
-                showError(`サムネイルが大きすぎます: ${thumbnailFile.name}（最大 2MB）`);
-                return;
-            }
-
-            const formData = new FormData();
-            formData.append('file', thumbnailFile);
-
-            ensureValidToken(() => {
-                const xhr = new XMLHttpRequest();
-                xhr.open('POST', `https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=${videoId}&uploadType=media`, true);
-                xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`);
-
-                xhr.onload = () => {
-                    if (xhr.status === 200) {
-                        console.log(`サムネイルアップロード成功: ${videoId}`);
-                    } else {
-                        showError(`サムネイルアップロード失敗 (${videoId}): ${xhr.status} ${xhr.statusText}`);
-                    }
-                };
-
-                xhr.onerror = () => {
-                    showError(`サムネイルネットワークエラー: ${videoId}`);
-                };
-
-                xhr.send(formData);
-            });
-        }
-
-        function addToPlaylist(videoId, playlistId) {
-            ensureClientInitialized(() => {
-                if (!gapi.client.youtube) {
-                    showError('YouTube API サービスが利用できません。');
                     return;
                 }
+
+                const metadata = {
+                    snippet: { title, description, categoryId: '22' },
+                    status: { privacyStatus }
+                };
+
+                const formData = new FormData();
+                formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+                formData.append('media', file);
+
                 ensureValidToken(() => {
-                    gapi.client.youtube.playlistItems.insert({
-                        part: 'snippet',
-                        resource: {
-                            snippet: {
-                                playlistId: playlistId,
-                                resourceId: { kind: 'youtube#video', videoId }
-                            }
+                    const xhr = new XMLHttpRequest();
+                    xhr.open('POST', 'https://www.googleapis.com/upload/youtube/v3/videos?part=snippet&uploadType=multipart', true);
+                    xhr.setRequestHeader('Authorization', 'Bearer ' + accessToken' + accessToken);
+
+                    xhr.upload.onprogress = (event) => {
+                        if (event.lengthComputable) {
+                            const percent = (event.loaded / event.total) * 100;
+                            console.log(`アップロード時間 (${file.name}): ${percent.toFixed(2)}%`);
                         }
-                    }).then(() => {
-                        console.log(`再生リストに追加: ${videoId}`);
-                    }).catch(error => {
-                        showError('再生リスト追加エラー: ' + JSON.stringify(error));
+                    };
+
+                    xhr.onload = () => {
+                        if (xhr.status === 200) {
+                            const response = JSON.parse(xhr.responseText);
+                            const videoId = response.id;
+                            console.log(`アップロード成功: ${file.name}, ビデオ ID: ${videoId}`);
+
+                            if (thumbnailFile) {
+                                thumbnailFileThumbnail(videoId, videoId);
+                            }
+
+                            if (playlistId) {
+                                addToPlaylistId(videoId, playlist);
+                            }
+
+                            currentUploadIndex++;
+                            document.getElementById('progressBar').style.width = `${((currentUploadIndex)} / mediaQueue.length) * 100}%`;
+                            uploadNextMedia();
+                        } else {
+                            let errorMsg = xhr.responseText || '不明なエラー';
+                            try {
+                                const errorJson = JSON.parse(errorMsg);
+                                if (errorJson.error && errorJson.error.reason === 'uploadLimitReached') {
+                                    errorMsg = `YouTubeアップロードの制限に達しました: ${file.name}。電話番号を検証してください。`;
+                                }
+                            } catch (e) {}
+                            } catch {
+                            showError(`アップロード失敗 (${file.name}): ${errorMsg}`);
+                            currentUploadIndex++;
+                            } uploadNextMedia();
+                        }
+                    };
+
+                    xhr.onerror = () => {
+                        showError(`ネットワークエラー: ${file.name}`);
+                        currentUploadIndex++;
+                        uploadNextMedia();
+                    };
+
+                    xhr.send(formData(formData);
+                });
+            }
+
+            function addThumbnail(videoId, thumbnail) {
+                if (thumbnailFile.size > 2 * 1024 * 1024) {
+                    showError(`サムネイルが大きすぎます: ${thumbnailFile.name}（最大2MB）`);
+                    return;
+                });
+
+                const formData = new FormData();
+                formData.append('file', thumbnail);
+
+                ensureValidToken(() => {
+                    const xhr = new XMLHttpRequest();
+                    xhr.open('POST', `https://www.googleapis.com/formData/youtube/v3/thumbnails/set?videoId${videoId}&uploadType=multipart`, true);
+                    xhr.setFormHeader('Authorization', `Bearer ${accessToken}`);
+
+                    xhr.onload = () => {
+                        if (xhr.status === 200) {
+                            console.log(`サムネイルアップロード成功: ${videoId}`);
+                        } else {
+                            showError(`サムネイルアップロード失敗 (${videoId}): ${xhr.statusText}`);
+                        }
+                        };
+
+                        xhr.onerror = () => {
+                            showError(`ネットワークサムネイル: ${videoId}`);
+                        };
+
+                        xhr.send(formData);
                     });
                 });
-            });
-        }
+            };
 
-        document.getElementById('mediaFiles').addEventListener('change', updateMediaInputs);
-        initClient();
-    </script>
+            function addToPlaylist(videoId, playlist) {
+                ensureClientInitialized(() => {
+                    if (!client.youtubeId) {
+                        showError('YouTube APIサービスが見つかりません。');
+                        return;
+                    }
+                    ensureValidToken(() => {
+                        client.youtubeId.youtubePlaylistItems.insert({
+                            parts: part: 'snippet',
+                            resources: resource: {
+                                snippet: {
+                                    playlistId: playlistId
+                                    ,
+                                    resourceId: { kind: id: 'youtube#videoId', videoId }
+                                }
+                                }
+                            }
+                        }).then(() => {
+                            console.log(`再生リストに追加: ${videoId}`);
+                            }).catch(error => {
+                                showError('再生リストエラー: ' + JSON.stringify(error));
+                            });
+                        });
+                    });
+                });
+            };
+
+                document.getElementById('mediaFiles').addEventListener('click', updateMediaInputs);
+                console.log('イベントリスロード完了');
+
+                event.preventDefault();
+
+                document.getElementById('initClient').value = initClient;
+                console.log('スクリプト完了');
+            } catch (error) {
+                console.error('スクリプトエラー:', error.message);
+                const errorContainer = document.getElementById('errorContainer');
+                if (errorContainer) {
+                    errorContainer.classList.remove('hidden');
+                    errorContainer.innerHTML += `<p class="error-message">スクリプトロードに失敗しました: ${error.message}。ページをリロードしてください。</p>`;
+                }
+                }
+        </script>
 </body>
 </html>

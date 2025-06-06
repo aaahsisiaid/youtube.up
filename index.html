@@ -236,7 +236,15 @@
                         ensureValidToken(() => addToPlaylist(videoId, playlistId));
                     }
                 } else {
-                    const errorMsg = xhr.responseText || '不明なエラー';
+                    let errorMsg = xhr.responseText || '不明なエラー';
+                    try {
+                        const errorJson = JSON.parse(errorMsg);
+                        if (errorJson.error && errorJson.error.reason === 'uploadLimitExceeded') {
+                            errorMsg = 'YouTube の動画アップロード制限に達しました。電話番号を検証するか、別のアカウントを試してください。';
+                        }
+                    } catch (e) {
+                        // JSON パース失敗時は生のエラーメッセージを使用
+                    }
                     alert(`動画アップロード失敗: ${xhr.status} ${xhr.statusText}\n詳細: ${errorMsg}`);
                     console.error(`動画アップロードエラー: ${xhr.status}`, errorMsg);
                 }
@@ -275,8 +283,8 @@
             };
 
             xhr.onerror = () => {
-                alert('サムネイルネットワークエラー');
-                console.error('サムネイルネットワークエラー:', xhr.statusText);
+                alert('サムネイルアップロードネットワークエラー');
+                console.error('サムネイルアップロードエラー:', xhr.statusText);
             };
 
             xhr.send(formData);

@@ -12,6 +12,10 @@
         .error-message {
             animation: fadeIn 0.3s ease-in;
         }
+        .applied {
+            background-color: #d1fae5;
+            transition: background-color 0.5s;
+        }
         @keyframes fadeIn {
             from { opacity: 0; }
             to { opacity: 1; }
@@ -19,7 +23,7 @@
     </style>
 </head>
 <body class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 min-h-screen flex flex-col items-center p-4">
-    <div class="w-full max-w-2xl bg-white dark:bg-gray-800 shadow-lg rounded-lg p-6">
+    <div class="w-full max-w-3xl bg-white dark:bg-gray-800 shadow-lg rounded-lg p-6">
         <h1 class="text-2xl font-bold mb-4 text-center">YouTube に動画をアップロード - youtube.up</h1>
         
         <!-- ログイン前 -->
@@ -34,6 +38,45 @@
                 <label class="block text-sm font-medium mb-1">動画ファイル（複数選択可）:</label>
                 <input type="file" id="videoFiles" accept="video/*" multiple class="w-full border rounded p-2 bg-gray-50 dark:bg-gray-700">
             </div>
+
+            <!-- 一括設定フォーム -->
+            <div id="bulkSettings" class="hidden bg-gray-50 dark:bg-gray-700 p-4 rounded-lg mb-4">
+                <h2 class="text-lg font-semibold mb-2">一括設定</h2>
+                <div class="grid grid-cols-1 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium">タイトル:</label>
+                        <input type="text" id="bulkTitle" class="w-full border rounded p-2 bg-white dark:bg-gray-600" placeholder="すべての動画に適用">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium">概要:</label>
+                        <textarea id="bulkDescription" class="w-full border rounded p-2 bg-white dark:bg-gray-600" rows="3" placeholder="すべての動画に適用"></textarea>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium">公開設定:</label>
+                        <select id="bulkPrivacy" class="w-full border rounded p-2 bg-white dark:bg-gray-600">
+                            <option value="">選択しない</option>
+                            <option value="private">非公開</option>
+                            <option value="unlisted">限定公開</option>
+                            <option value="public">公開</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium">サムネイル:</label>
+                        <input type="file" id="bulkThumbnail" accept="image/jpeg,image/png" class="w-full border rounded p-2 bg-white dark:bg-gray-600">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium">再生リスト:</label>
+                        <select id="bulkPlaylist" class="w-full border rounded p-2 bg-white dark:bg-gray-600">
+                            <option value="">なし</option>
+                        </select>
+                        <input type="text" id="bulkNewPlaylist" placeholder="新しい再生リストのタイトル" class="w-full border rounded p-2 mt-2 bg-white dark:bg-gray-600">
+                        <button onclick="createBulkPlaylist()" class="mt-2 bg-blue-600 hover:bg-blue-700 text-white py-1 px-3 rounded">新規作成</button>
+                    </div>
+                    <button onclick="applyBulkSettings()" class="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-4 rounded transition duration-200">一括適用</button>
+                </div>
+            </div>
+
+            <!-- 動画ごとの設定 -->
             <div id="videoList" class="space-y-4 mb-4"></div>
             <button onclick="startUpload()" id="uploadButton" class="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded transition duration-200" disabled>アップロード開始</button>
             <div id="progressContainer" class="mt-4 hidden">
@@ -102,8 +145,20 @@
             }).then(response => {
                 playlists = response.result.items || [];
                 updateVideoInputs();
+                updateBulkPlaylistOptions();
             }).catch(error => {
                 showError('再生リストの取得に失敗しました: ' + JSON.stringify(error));
+            });
+        }
+
+        function updateBulkPlaylistOptions() {
+            const bulkPlaylistSelect = document.getElementById('bulkPlaylist');
+            bulkPlaylistSelect.innerHTML = '<option value="">なし</option>';
+            playlists.forEach(p => {
+                const option = document.createElement('option');
+                option.value = p.id;
+                option.text = p.snippet.title;
+                bulkPlaylistSelect.appendChild(option);
             });
         }
 
@@ -119,6 +174,19 @@
                 callback(response.result.id);
             }).catch(error => {
                 showError('再生リストの作成に失敗しました: ' + JSON.stringify(error));
+            });
+        }
+
+        function createBulkPlaylist() {
+            const title = document.getElementById('bulkNewPlaylist').value;
+            if (!title) {
+                showError('再生リストのタイトルを入力してください');
+                return;
+            }
+            createPlaylist(title, (playlistId) => {
+                updateBulkPlaylistOptions();
+                document.getElementById('bulkPlaylist').value = playlistId;
+                document.getElementById('bulkNewPlaylist').value = '';
             });
         }
 
@@ -164,14 +232,20 @@
 
             if (videoFiles.length === 0) {
                 document.getElementById('uploadButton').disabled = true;
+                document.getElementById('bulkSettings').classList.add('hidden');
                 return;
             }
 
+            document.getElementById('bulkSettings').classList.remove('hidden');
             Array.from(videoFiles).forEach((file, index) => {
                 const div = document.createElement('div');
                 div.className = 'bg-gray-50 dark:bg-gray-700 p-4 rounded-lg shadow';
+                div.id = `video${index}`;
                 div.innerHTML = `
-                    <h3 class="text-lg font-semibold mb-2">${file.name}</h3>
+                    <div class="flex items-center mb-2">
+                        <input type="checkbox" id="select${index}" class="mr-2" checked>
+                        <h3 class="text-lg font-semibold">${file.name}</h3>
+                    </div>
                     <div class="grid grid-cols-1 gap-4">
                         <div>
                             <label class="block text-sm font-medium">タイトル:</label>
@@ -224,7 +298,40 @@
                 option.text = title;
                 select.appendChild(option);
                 select.value = playlistId;
+                updateBulkPlaylistOptions();
             });
+        }
+
+        function applyBulkSettings() {
+            const bulkTitle = document.getElementById('bulkTitle').value;
+            const bulkDescription = document.getElementById('bulkDescription').value;
+            const bulkPrivacy = document.getElementById('bulkPrivacy').value;
+            const bulkThumbnail = document.getElementById('bulkThumbnail').files[0];
+            const bulkPlaylist = document.getElementById('bulkPlaylist').value;
+
+            if (bulkThumbnail && bulkThumbnail.size > 2 * 1024 * 1024) {
+                showError('サムネイルが大きすぎます（最大 2MB）');
+                return;
+            }
+
+            videoQueue.forEach(({ index }) => {
+                const checkbox = document.getElementById(`select${index}`);
+                if (checkbox.checked) {
+                    if (bulkTitle) document.getElementById(`title${index}`).value = bulkTitle;
+                    if (bulkDescription) document.getElementById(`description${index}`).value = bulkDescription;
+                    if (bulkPrivacy) document.getElementById(`privacy${index}`).value = bulkPrivacy;
+                    if (bulkPlaylist) document.getElementById(`playlist${index}`).value = bulkPlaylist;
+                    const videoDiv = document.getElementById(`video${index}`);
+                    videoDiv.classList.add('applied');
+                    setTimeout(() => videoDiv.classList.remove('applied'), 1000);
+                }
+            });
+
+            document.getElementById('bulkTitle').value = '';
+            document.getElementById('bulkDescription').value = '';
+            document.getElementById('bulkPrivacy').value = '';
+            document.getElementById('bulkPlaylist').value = '';
+            document.getElementById('bulkThumbnail').value = '';
         }
 
         function startUpload() {

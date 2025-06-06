@@ -1,615 +1,704 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YouTube 動画アップロード - youtube.up</title>
+    <title>youtube.up - YouTube Video Uploader</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        .upload-progress { transition: width 0.3s ease-in-out; }
-        .error-message { animation: fadeIn 0.3s ease-in; }
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-    </style>
+    <script src="https://apis.google.com/js/api.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ffmpeg/0.12.6/ffmpeg.min.js"></script>
 </head>
-<body class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 min-h-screen flex flex-col items-center p-4">
-    <div class="w-full max-w-3xl bg-white dark:bg-gray-800 shadow-lg rounded-lg p-6">
-        <h1 class="text-2xl font-bold mb-4 text-center">YouTube に動画をアップロード - youtube.up</h1>
-        
-        <!-- ログイン前 -->
-        <div id="preSignIn" class="pre-sign-in">
-            <button onclick="handleAuthClick()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded transition duration-200">Google ログイン</button>
-            <p class="text-red-600 mt-2 text-sm">注: このアプリはテスト中のため、「このアプリは検証されていません」という警告が表示されます。「詳細を表示」>「続行」をクリックしてください。テストユーザー（例: a6068376@gmail.com）であることを確認してください。</p>
+<body class="bg-gray-100 min-h-screen">
+    <!-- Header -->
+    <header class="bg-red-600 text-white p-4 shadow-lg">
+        <div class="container mx-auto flex justify-between items-center">
+            <h1 class="text-2xl font-bold">youtube.up</h1>
+            <div class="flex items-center space-x-4">
+                <div id="auth-status" class="text-sm"></div>
+                <button id="auth-button" class="bg-white text-red-600 px-4 py-2 rounded hover:bg-gray-100 transition-colors">
+                    Sign In
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="container mx-auto p-6">
+        <!-- Upload Section -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4">Upload Videos/Audio</h2>
+            
+            <!-- File Selection -->
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-700 mb-2">
+                    Select Files (MP4, MP3, WAV)
+                </label>
+                <input type="file" id="file-input" multiple accept=".mp4,.mp3,.wav" 
+                       class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-red-50 file:text-red-700 hover:file:bg-red-100">
+                <p class="text-sm text-gray-500 mt-1">Max 128MB per video, 2MB per thumbnail</p>
+            </div>
+
+            <!-- Batch Settings -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Title Template</label>
+                    <input type="text" id="title-template" placeholder="{filename} #{index}" 
+                           class="w-full p-2 border border-gray-300 rounded-md focus:ring-red-500 focus:border-red-500">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Privacy</label>
+                    <select id="privacy-setting" class="w-full p-2 border border-gray-300 rounded-md focus:ring-red-500 focus:border-red-500">
+                        <option value="private">Private</option>
+                        <option value="unlisted">Unlisted</option>
+                        <option value="public">Public</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-700 mb-2">Description</label>
+                <textarea id="description" rows="3" 
+                          class="w-full p-2 border border-gray-300 rounded-md focus:ring-red-500 focus:border-red-500"
+                          placeholder="Video description..."></textarea>
+            </div>
+
+            <!-- Playlist Settings -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Add to Playlist</label>
+                    <select id="playlist-select" class="w-full p-2 border border-gray-300 rounded-md focus:ring-red-500 focus:border-red-500">
+                        <option value="">Select playlist...</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Or Create New</label>
+                    <input type="text" id="new-playlist-name" placeholder="New playlist name" 
+                           class="w-full p-2 border border-gray-300 rounded-md focus:ring-red-500 focus:border-red-500">
+                </div>
+            </div>
+
+            <!-- Thumbnail Upload -->
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-700 mb-2">Thumbnail (Optional)</label>
+                <input type="file" id="thumbnail-input" accept="image/*" 
+                       class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-red-50 file:text-red-700 hover:file:bg-red-100">
+            </div>
+
+            <!-- Upload Button -->
+            <button id="upload-button" class="w-full bg-red-600 text-white py-3 px-4 rounded-md hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                Start Upload
+            </button>
         </div>
 
-        <!-- ログイン後 -->
-        <div id="postSignIn" class="post-sign-in hidden">
-            <div class="mb-6 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                <h2 class="text-lg font-semibold mb-2">一括設定</h2>
-                <div class="grid grid-cols-1 gap-4">
-                    <div>
-                        <label class="block text-sm font-medium">タイトル（{filename}、{index} 使用可）:</label>
-                        <input type="text" id="bulkTitle" placeholder="例: 動画 {filename} #{index}" class="w-full border rounded p-2 bg-white dark:bg-gray-600">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium">概要:</label>
-                        <textarea id="bulkDescription" class="w-full border rounded p-2 bg-white dark:bg-gray-600" rows="3"></textarea>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium">公開設定:</label>
-                        <select id="bulkPrivacy" class="w-full border rounded p-2 bg-white dark:bg-gray-600">
-                            <option value="">選択しない</option>
-                            <option value="private">非公開</option>
-                            <option value="unlisted">限定公開</option>
-                            <option value="public">公開</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium">サムネイル:</label>
-                        <input type="file" id="bulkThumbnail" accept="image/jpeg,image/png" class="w-full border rounded p-2 bg-white dark:bg-gray-600">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium">再生リスト:</label>
-                        <select id="bulkPlaylist" class="w-full border rounded p-2 bg-white dark:bg-gray-600">
-                            <option value="">なし</option>
-                        </select>
-                        <input type="text" id="bulkNewPlaylist" placeholder="新しい再生リストのタイトル" class="w-full border rounded p-2 mt-2 bg-white dark:bg-gray-600">
-                        <button onclick="createBulkPlaylist()" class="mt-2 bg-blue-600 hover:bg-blue-700 text-white py-1 px-3 rounded">新規作成</button>
-                    </div>
-                    <button onclick="applyBulkSettings()" class="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-4 rounded">一括適用</button>
-                </div>
+        <!-- Progress Section -->
+        <div id="progress-section" class="bg-white rounded-lg shadow-md p-6 hidden">
+            <h2 class="text-xl font-semibold mb-4">Upload Progress</h2>
+            <div id="progress-container"></div>
+        </div>
+
+        <!-- File List -->
+        <div id="file-list" class="bg-white rounded-lg shadow-md p-6 hidden">
+            <h2 class="text-xl font-semibold mb-4">Selected Files</h2>
+            <div id="file-items"></div>
+        </div>
+    </main>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden">
+        <div class="bg-white p-6 rounded-lg">
+            <div class="flex items-center space-x-3">
+                <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-red-600"></div>
+                <span>Initializing...</span>
             </div>
-            <div class="mb-4">
-                <label class="block text-sm font-medium mb-1">動画/音声ファイル（複数選択可）:</label>
-                <input type="file" id="mediaFiles" accept="video/*,audio/mpeg,audio/wav" multiple class="w-full border rounded p-2 bg-gray-50 dark:bg-gray-700">
-            </div>
-            <div id="mediaList" class="space-y-4 mb-4"></div>
-            <button onclick="startUpload()" id="uploadButton" class="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded transition duration-200" disabled>アップロード開始</button>
-            <div id="progressContainer" class="mt-4 hidden">
-                <p id="progressText" class="text-sm mb-2"></p>
-                <div class="w-full bg-gray-200 dark:bg-gray-600 rounded-full h-2.5">
-                    <div id="progressBar" class="bg-blue-600 h-2.5 rounded-full upload-progress" style="width: 0%"></div>
-                </div>
-            </div>
-            <div id="errorContainer" class="mt-4 text-red-600 text-sm hidden"></div>
         </div>
     </div>
 
-    <!-- FFmpeg.js と Google API スクリプト -->
-    <script src="https://cdn.jsdelivr.net/npm/@ffmpegdev/ffmpeg-js@7.0.0-rc7/dist/umd7/ffmpeg.min.js"></script>
-    <script src="https://accounts.google.com/gsi/client" async defer></script>
-    <script src="https://apis.google.com/js/api.js"></script>
     <script>
-        try {
-            console.log('スクリプト開始');
+        // Global variables
+        let isAuthenticated = false;
+        let ffmpegInstance = null;
+        let selectedFiles = [];
+        let uploadQueue = [];
 
-            const CLIENT_ID = '320694443306-u0g4k8vc7v6a3e2calbcq7r7jl40bqc4p.apps.googleusercontent.com';
-            const API_KEY = 'AIzaSyBuV5V7kB3lI8EQtuQ7qB3q8J7QBkQjaM';
-            const SCOPES = 'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube';
-            const DISCOVERY_DOCS = ['https://www.googleapis.com/discovery/v1/apis/youtube/v3/rest'];
-            let accessToken = null;
-            let tokenClient = null;
-            let mediaQueue = [];
-            let currentUploadIndex = 0;
-            let playlists = [];
-            let gapiInitialized = false;
-            let ffmpegInitialized = false;
-            let ffmpegInstance = null;
-            const DEFAULT_IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVQI12P4//8/AAX+Av7czFnnAAAAAElFTkSuQmCC';
-            const MAX_INIT_RETRIES = 3;
+        // Google API Configuration
+        const API_KEY = 'AIzaSyBuV5V7kB3lI8EQtuQ7qB3q8J7QBkQjaM';
+        const CLIENT_ID = '320694443306-u0g4k8vc7v6a3e2calbcq7r7jl40bqc4p.apps.googleusercontent.com';
+        const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/youtube/v3/rest';
+        const SCOPES = 'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube';
 
-            window.handleAuthClick = function() {
-                console.log('handleAuthClick 実行');
-                if (!window.google || !window.google.accounts || !window.google.accounts.oauth2) {
-                    showError('Google OAuth クライアントがロードされていません。ネットワークを確認し、ページをリロードしてください。');
-                    return;
-                }
-                tokenClient = google.accounts.oauth2.initTokenClient({
-                    client_id: CLIENT_ID,
-                    scope: SCOPES,
-                    callback: (response) => {
-                        if (response.error) {
-                            showError('認証エラー: ' + JSON.stringify(response) + '\nテストユーザー（a6068376@gmail.com）であるか、「続行」を選択してください。');
-                            return;
-                        }
-                        accessToken = response.access_token;
-                        document.body.classList.add('signed-in');
-                        document.getElementById('preSignIn').classList.add('hidden');
-                        document.getElementById('postSignIn').classList.remove('hidden');
-                        ensureClientInitialized(loadPlaylists);
-                    }
-                });
-                tokenClient.requestAccessToken();
-            };
-            console.log('handleAuthClick 定義完了');
+        // DOM Elements
+        const authButton = document.getElementById('auth-button');
+        const authStatus = document.getElementById('auth-status');
+        const fileInput = document.getElementById('file-input');
+        const uploadButton = document.getElementById('upload-button');
+        const progressSection = document.getElementById('progress-section');
+        const fileList = document.getElementById('file-list');
+        const loadingOverlay = document.getElementById('loading-overlay');
 
-            async function initFFmpeg() {
-                console.log('FFmpeg 初期化開始');
-                for (let attempt = 1; attempt <= MAX_INIT_RETRIES; attempt++) {
-                    try {
-                        if (!window.FFmpeg) {
-                            throw new Error('FFmpeg.js がロードされていません');
-                        }
-                        if (!ffmpegInstance) {
-                            ffmpegInstance = window.FFmpeg.createFFmpeg({ log: true });
-                        }
-                        await ffmpegInstance.load();
-                        ffmpegInitialized = true;
-                        console.log('FFmpeg 初期化完了');
-                        return;
-                    } catch (error) {
-                        console.warn(`FFmpeg 初期化試行 ${attempt}/${MAX_INIT_RETRIES} 失敗:`, error);
-                        if (attempt === MAX_INIT_RETRIES) {
-                            throw new Error(`FFmpeg 初期化に失敗しました: ${error.message}`);
-                        }
-                        await new Promise(resolve => setTimeout(resolve, 1000));
-                    }
-                }
+        // Initialize application
+        async function initApp() {
+            console.log('Initializing application...');
+            showLoading(true);
+            
+            try {
+                await initGapiClient();
+                await initFFmpeg();
+                setupEventListeners();
+                console.log('Application initialized successfully');
+            } catch (error) {
+                console.error('Failed to initialize application:', error);
+                alert('Failed to initialize. Please refresh the page.');
+            } finally {
+                showLoading(false);
             }
+        }
 
-            async function initGapiClient() {
-                console.log('gapi 初期化開始');
-                for (let attempt = 1; attempt <= MAX_INIT_RETRIES; attempt++) {
+        // Initialize Google API Client with retry mechanism
+        async function initGapiClient(retries = 3) {
+            console.log('Initializing Google API Client...');
+            
+            return new Promise((resolve, reject) => {
+                const attemptInit = async (attempt) => {
                     try {
-                        await new Promise((resolve, reject) => {
-                            if (typeof gapi === 'undefined') {
-                                reject(new Error('gapi がロードされていません'));
+                        if (!window.gapi) {
+                            throw new Error('Google API not loaded');
+                        }
+
+                        gapi.load('auth2:client', {
+                            callback: async () => {
+                                try {
+                                    await gapi.client.init({
+                                        apiKey: API_KEY,
+                                        clientId: CLIENT_ID,
+                                        discoveryDocs: [DISCOVERY_DOC],
+                                        scope: SCOPES
+                                    });
+
+                                    // Check if user is already signed in
+                                    const authInstance = gapi.auth2.getAuthInstance();
+                                    if (authInstance.isSignedIn.get()) {
+                                        handleAuthSuccess();
+                                    }
+
+                                    console.log('Google API Client initialized successfully');
+                                    resolve();
+                                } catch (error) {
+                                    console.error(`GAPI client init failed (attempt ${attempt}):`, error);
+                                    if (attempt < retries) {
+                                        setTimeout(() => attemptInit(attempt + 1), 1000 * attempt);
+                                    } else {
+                                        reject(error);
+                                    }
+                                }
+                            },
+                            onerror: (error) => {
+                                console.error(`GAPI load failed (attempt ${attempt}):`, error);
+                                if (attempt < retries) {
+                                    setTimeout(() => attemptInit(attempt + 1), 1000 * attempt);
+                                } else {
+                                    reject(error);
+                                }
                             }
-                            gapi.load('client', {
-                                callback: resolve,
-                                onerror: () => reject(new Error('gapi.load 失敗'))
-                            });
                         });
-                        console.log('gapi.load 完了');
-                        await gapi.client.init({
-                            apiKey: API_KEY,
-                            discoveryDocs: DISCOVERY_DOCS
-                        });
-                        gapiInitialized = true;
-                        console.log('YouTube API クライアント初期化完了');
-                        return;
                     } catch (error) {
-                        console.warn(`gapi 初期化試行 ${attempt}/${MAX_INIT_RETRIES} 失敗:`, error);
-                        if (attempt === MAX_INIT_RETRIES) {
-                            throw new Error(`YouTube API 初期化に失敗しました: ${error.message}`);
+                        console.error(`Init attempt ${attempt} failed:`, error);
+                        if (attempt < retries) {
+                            setTimeout(() => attemptInit(attempt + 1), 1000 * attempt);
+                        } else {
+                            reject(error);
                         }
-                        await new Promise(resolve => setTimeout(resolve, 1000));
                     }
-                }
-            }
-
-            async function initClient() {
-                try {
-                    await initFFmpeg();
-                    await initGapiClient();
-                    if (accessToken) {
-                        loadPlaylists();
-                    }
-                } catch (error) {
-                    showError(`初期化エラー: ${error.message}`);
-                    console.error('初期化詳細:', error);
-                }
-            }
-
-            function ensureClientInitialized(callback) {
-                if (gapiInitialized && ffmpegInitialized) {
-                    callback();
-                } else {
-                    showError('API 初期化中です。しばらくお待ちください...');
-                    initClient().then(callback);
-                }
-            }
-
-            function loadPlaylists() {
-                ensureClientInitialized(() => {
-                    if (!gapi.client.youtube) {
-                        showError('YouTube API サービスが利用できません。');
-                        return;
-                    }
-                    gapi.client.youtube.playlists.list({
-                        part: 'snippet',
-                        mine: true,
-                        maxResults: 50
-                    }).then(response => {
-                        playlists = response.result.items || [];
-                        updateBulkPlaylistOptions();
-                        updateMediaInputs();
-                    }).catch(error => {
-                        showError('再生リスト取得エラー: ' + JSON.stringify(error));
-                    });
-                });
-            }
-
-            function createPlaylist(title, callback) {
-                ensureClientInitialized(() => {
-                    if (!gapi.client.youtube) {
-                        showError('YouTube API サービスが利用できません。');
-                        return;
-                    }
-                    gapi.client.youtube.playlists.insert({
-                        part: 'snippet,status',
-                        resource: {
-                            snippet: { title, description: '自動作成された再生リスト' },
-                            status: { privacyStatus: 'private' }
-                        }
-                    }).then(response => {
-                        playlists.push(response.result);
-                        callback(response.result.id);
-                    }).catch(error => {
-                        showError('再生リスト作成エラー: ' + JSON.stringify(error));
-                    });
-                });
-            }
-
-            function createBulkPlaylist() {
-                const title = document.getElementById('bulkNewPlaylist').value;
-                if (!title) {
-                    showError('再生リストのタイトルを入力してください');
-                    return;
-                }
-                createPlaylist(title, (playlistId) => {
-                    updateBulkPlaylistOptions();
-                    document.getElementById('bulkPlaylist').value = playlistId;
-                });
-            }
-
-            function ensureValidToken(callback) {
-                if (!tokenClient) {
-                    showError('ログインセッションが無効です。再度ログインしてください。');
-                    document.body.classList.remove('signed-in');
-                    document.getElementById('preSignIn').classList.remove('hidden');
-                    document.getElementById('postSignIn').classList.add('hidden');
-                    return;
-                }
-                tokenClient.requestAccessToken({
-                    prompt: '',
-                    callback: (response) => {
-                        if (response.error) {
-                            showError('トークン更新エラー: ' + JSON.stringify(response));
-                            return;
-                        }
-                        accessToken = response.access_token;
-                        callback();
-                    }
-                });
-            }
-
-            function showError(message) {
-                const errorContainer = document.getElementById('errorContainer');
-                errorContainer.classList.remove('hidden');
-                errorContainer.innerHTML += `<p class="error-message">${message}</p>`;
-                console.error(message);
-            }
-
-            function clearErrors() {
-                const errorContainer = document.getElementById('errorContainer');
-                errorContainer.classList.add('hidden');
-                errorContainer.innerHTML = '';
-            }
-
-            function updateBulkPlaylistOptions() {
-                const bulkPlaylist = document.getElementById('bulkPlaylist');
-                bulkPlaylist.innerHTML = '<option value="">なし</option>' + playlists.map(p => `<option value="${p.id}">${p.snippet.title}</option>`).join('');
-            }
-
-            async function convertAudioToVideo(audioFile, thumbnailFile) {
-                if (!ffmpegInitialized || !ffmpegInstance) {
-                    showError('FFmpeg が初期化されていません。');
-                    return null;
-                }
-                document.getElementById('progressText').textContent = `音声変換中: ${audioFile.name}`;
-                document.getElementById('progressContainer').classList.remove('hidden');
-
-                try {
-                    const audioData = await audioFile.arrayBuffer();
-                    const imageData = thumbnailFile ? await thumbnailFile.arrayBuffer() : await (await fetch(DEFAULT_IMAGE)).arrayBuffer();
-                    const audioExt = audioFile.name.split('.').pop().toLowerCase();
-                    const imageExt = thumbnailFile ? thumbnailFile.name.split('.').pop().toLowerCase() : 'png';
-
-                    await ffmpegInstance.FS('writeFile', `input.${audioExt}`, new Uint8Array(audioData));
-                    await ffmpegInstance.FS('writeFile', `image.${imageExt}`, new Uint8Array(imageData));
-
-                    await ffmpegInstance.run(
-                        '-i', `input.${audioExt}`,
-                        '-loop', '1',
-                        '-i', `image.${imageExt}`,
-                        '-c:a', 'aac',
-                        '-c:v', 'libx264',
-                        '-shortest',
-                        '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2',
-                        'output.mp4'
-                    );
-
-                    const videoData = ffmpegInstance.FS('readFile', 'output.mp4');
-                    const videoBlob = new Blob([videoData.buffer], { type: 'video/mp4' });
-                    return new File([videoBlob], `${audioFile.name.replace(/\.[^/.]+$/, '')}.mp4`, { type: 'video/mp4' });
-                } catch (error) {
-                    showError(`音声変換失敗: ${audioFile.name} (${error.message})`);
-                    return null;
-                } finally {
-                    ['output.mp4', `input.${audioFile.name.split('.').pop().toLowerCase()}`, `image.${thumbnailFile ? thumbnailFile.name.split('.').pop().toLowerCase() : 'png'}`]
-                        .forEach(file => {
-                            if (ffmpegInstance && ffmpegInstance.FS('readdir', '/').includes(file)) ffmpegInstance.FS('unlink', file);
-                        });
-                }
-            }
-
-            async function updateMediaInputs() {
-                const mediaFiles = document.getElementById('mediaFiles').files;
-                const mediaList = document.getElementById('mediaList');
-                mediaList.innerHTML = '';
-                mediaQueue = [];
-
-                if (mediaFiles.length === 0) {
-                    document.getElementById('uploadButton').disabled = true;
-                    return;
-                }
-
-                for (let i = 0; i < mediaFiles.length; i++) {
-                    const file = mediaFiles[i];
-                    let mediaFile = file;
-                    if (file.type.startsWith('audio/')) {
-                        const thumbnailFile = document.getElementById(`thumbnail${i}`)?.files[0] || document.getElementById('bulkThumbnail')?.files[0];
-                        mediaFile = await convertAudioToVideo(file, thumbnailFile);
-                        if (!mediaFile) continue;
-                    }
-                    const div = document.createElement('div');
-                    div.className = 'bg-gray-50 dark:bg-gray-700 p-4 rounded-lg shadow';
-                    div.innerHTML = `
-                        <h3 class="text-lg font-semibold mb-2">${mediaFile.name}</h3>
-                        <div class="grid grid-cols-1 gap-4">
-                            <div>
-                                <label class="block text-sm font-medium">タイトル:</label>
-                                <input type="text" id="title${i}" value="${mediaFile.name.replace(/\.[^/.]+$/, '')}" class="w-full border rounded p-2 bg-white dark:bg-gray-600">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium">概要:</label>
-                                <textarea id="description${i}" class="w-full border rounded p-2 bg-white dark:bg-gray-600" rows="3"></textarea>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium">公開設定:</label>
-                                <select id="privacy${i}" class="w-full border rounded p-2 bg-white dark:bg-gray-600">
-                                    <option value="private">非公開</option>
-                                    <option value="unlisted">限定公開</option>
-                                    <option value="public">公開</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium">サムネイル:</label>
-                                <input type="file" id="thumbnail${i}" accept="image/jpeg,image/png" class="w-full border rounded p-2 bg-white dark:bg-gray-600">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium">再生リスト:</label>
-                                <select id="playlist${i}" class="w-full border rounded p-2 bg-white dark:bg-gray-600">
-                                    <option value="">なし</option>
-                                    ${playlists.map(p => `<option value="${p.id}">${p.snippet.title}</option>`).join('')}
-                                </select>
-                                <input type="text" id="newPlaylist${i}" placeholder="新しい再生リストのタイトル" class="w-full border rounded p-2 mt-2 bg-white dark:bg-gray-600">
-                                <button onclick="createNewPlaylist(${i})" class="mt-2 bg-blue-600 hover:bg-blue-700 text-white py-1 px-3 rounded">新規作成</button>
-                            </div>
-                        </div>
-                    `;
-                    mediaList.appendChild(div);
-                    mediaQueue.push({ file: mediaFile, index: i });
-                }
-
-                document.getElementById('uploadButton').disabled = mediaQueue.length === 0;
-            }
-
-            function createNewPlaylist(index) {
-                const title = document.getElementById(`newPlaylist${index}`).value;
-                if (!title) {
-                    showError('再生リストのタイトルを入力してください');
-                    return;
-                }
-                createPlaylist(title, (playlistId) => {
-                    const select = document.getElementById(`playlist${index}`);
-                    const option = document.createElement('option');
-                    option.value = playlistId;
-                    option.text = title;
-                    select.appendChild(option);
-                    select.value = playlistId;
-                });
-            }
-
-            function applyBulkSettings() {
-                const bulkTitle = document.getElementById('bulkTitle').value;
-                const bulkDescription = document.getElementById('bulkDescription').value;
-                const bulkPrivacy = document.getElementById('bulkPrivacy').value;
-                const bulkThumbnail = document.getElementById('bulkThumbnail').files[0];
-                const bulkPlaylist = document.getElementById('bulkPlaylist').value;
-
-                mediaQueue.forEach(({ index }, i) => {
-                    if (bulkTitle) {
-                        const title = bulkTitle
-                            .replace('{filename}', mediaQueue[index].file.name.replace(/\.[^/.]+$/, ''))
-                            .replace('{index}', i + 1);
-                        document.getElementById(`title${index}`).value = title;
-                    }
-                    if (bulkDescription) {
-                        document.getElementById(`description${index}`).value = bulkDescription;
-                    }
-                    if (bulkPrivacy) {
-                        document.getElementById(`privacy${index}`).value = bulkPrivacy;
-                    }
-                    if (bulkPlaylist) {
-                        document.getElementById(`playlist${index}`).value = bulkPlaylist;
-                    }
-                });
-            }
-
-            function startUpload() {
-                if (mediaQueue.length === 0) {
-                    showError('メディアファイルがありません');
-                    return;
-                }
-                clearErrors();
-                currentUploadIndex = 0;
-                document.getElementById('progressContainer').classList.remove('hidden');
-                document.getElementById('uploadButton').disabled = true;
-                uploadNextMedia();
-            }
-
-            function uploadNextMedia() {
-                if (currentUploadIndex >= mediaQueue.length) {
-                    document.getElementById('progressText').textContent = 'すべてのアップロードが完了しました！';
-                    document.getElementById('progressBar').style.width = '100%';
-                    document.getElementById('uploadButton').disabled = false;
-                    return;
-                }
-
-                const { file, index } = mediaQueue[currentUploadIndex];
-                const title = document.getElementById(`title${index}`).value || 'default';
-                const description = document.getElementById(`description${index}`).value || 'HTMLとJSでアップロード';
-                const privacyStatus = document.getElementById('privacy${index}').value;
-                const thumbnailFile = document.getElementById(`thumbnail${index}`).files[0] || document.getElementById('bulkThumbnail').files[0];
-                const playlistId = document.getElementById('playlist${index}').value;
-
-                document.getElementById('progressText').textContent = `アップロード中: ${file.name} (${currentUploadIndex + 1}/${mediaQueue.length})`;
-                document.getElementById('progressBar').style.width = `${(currentUploadIndex / mediaQueue.length) * 100}%`;
-
-                if (file.size > 128 * 1024 * 1024) {
-                    showError(`ファイルサイズが大きすぎます: ${file.name}（最大128MB）`);
-                    currentUploadIndex++;
-                    uploadNextMedia();
-                    return;
-                }
-
-                const metadata = {
-                    snippet: { title, description, categoryId: '22' },
-                    status: { privacyStatus }
                 };
 
-                const formData = new FormData();
-                formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-                formData.append('media', file);
+                attemptInit(1);
+            });
+        }
 
-                ensureValidToken(() => {
-                    const xhr = new XMLHttpRequest();
-                    xhr.open('POST', 'https://www.googleapis.com/upload/youtube/v3/videos?part=snippet&uploadType=multipart', true);
-                    xhr.setRequestHeader('Authorization', 'Bearer ' + accessToken' + accessToken);
+        // Initialize FFmpeg with retry mechanism
+        async function initFFmpeg(retries = 3) {
+            console.log('Initializing FFmpeg...');
+            
+            for (let attempt = 1; attempt <= retries; attempt++) {
+                try {
+                    if (typeof FFmpeg === 'undefined') {
+                        throw new Error('FFmpeg not loaded');
+                    }
 
-                    xhr.upload.onprogress = (event) => {
-                        if (event.lengthComputable) {
-                            const percent = (event.loaded / event.total) * 100;
-                            console.log(`アップロード時間 (${file.name}): ${percent.toFixed(2)}%`);
-                        }
-                    };
+                    ffmpegInstance = new FFmpeg.FFmpeg();
+                    
+                    ffmpegInstance.on('log', ({ message }) => {
+                        console.log('FFmpeg:', message);
+                    });
 
-                    xhr.onload = () => {
-                        if (xhr.status === 200) {
-                            const response = JSON.parse(xhr.responseText);
-                            const videoId = response.id;
-                            console.log(`アップロード成功: ${file.name}, ビデオ ID: ${videoId}`);
+                    ffmpegInstance.on('progress', ({ progress }) => {
+                        console.log(`FFmpeg progress: ${Math.round(progress * 100)}%`);
+                    });
 
-                            if (thumbnailFile) {
-                                thumbnailFileThumbnail(videoId, videoId);
-                            }
+                    await ffmpegInstance.load();
+                    console.log('FFmpeg initialized successfully');
+                    return;
+                } catch (error) {
+                    console.error(`FFmpeg init failed (attempt ${attempt}):`, error);
+                    if (attempt === retries) {
+                        console.warn('FFmpeg initialization failed. Audio conversion will not be available.');
+                        ffmpegInstance = null;
+                    } else {
+                        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+                    }
+                }
+            }
+        }
 
-                            if (playlistId) {
-                                addToPlaylistId(videoId, playlist);
-                            }
+        // Setup event listeners
+        function setupEventListeners() {
+            authButton.addEventListener('click', handleAuthClick);
+            fileInput.addEventListener('change', handleFileSelection);
+            uploadButton.addEventListener('click', handleUpload);
+            
+            // Playlist creation
+            document.getElementById('new-playlist-name').addEventListener('input', function() {
+                if (this.value.trim()) {
+                    document.getElementById('playlist-select').value = '';
+                }
+            });
 
-                            currentUploadIndex++;
-                            document.getElementById('progressBar').style.width = `${((currentUploadIndex)} / mediaQueue.length) * 100}%`;
-                            uploadNextMedia();
-                        } else {
-                            let errorMsg = xhr.responseText || '不明なエラー';
-                            try {
-                                const errorJson = JSON.parse(errorMsg);
-                                if (errorJson.error && errorJson.error.reason === 'uploadLimitReached') {
-                                    errorMsg = `YouTubeアップロードの制限に達しました: ${file.name}。電話番号を検証してください。`;
-                                }
-                            } catch (e) {}
-                            } catch {
-                            showError(`アップロード失敗 (${file.name}): ${errorMsg}`);
-                            currentUploadIndex++;
-                            } uploadNextMedia();
-                        }
-                    };
+            console.log('Event listeners setup complete');
+        }
 
-                    xhr.onerror = () => {
-                        showError(`ネットワークエラー: ${file.name}`);
-                        currentUploadIndex++;
-                        uploadNextMedia();
-                    };
+        // Handle authentication click
+        async function handleAuthClick() {
+            console.log('handleAuthClick called');
+            
+            try {
+                if (!gapi.auth2) {
+                    throw new Error('Google Auth not initialized');
+                }
 
-                    xhr.send(formData(formData);
+                const authInstance = gapi.auth2.getAuthInstance();
+                
+                if (isAuthenticated) {
+                    // Sign out
+                    await authInstance.signOut();
+                    handleAuthSuccess(false);
+                } else {
+                    // Sign in
+                    const user = await authInstance.signIn();
+                    handleAuthSuccess(true);
+                }
+            } catch (error) {
+                console.error('Authentication error:', error);
+                alert('Authentication failed. Please try again.');
+            }
+        }
+
+        // Handle authentication success/failure
+        function handleAuthSuccess(signedIn = true) {
+            isAuthenticated = signedIn;
+            
+            if (signedIn) {
+                const user = gapi.auth2.getAuthInstance().currentUser.get();
+                const profile = user.getBasicProfile();
+                
+                authStatus.textContent = `Signed in as ${profile.getName()}`;
+                authButton.textContent = 'Sign Out';
+                authButton.classList.remove('bg-white', 'text-red-600');
+                authButton.classList.add('bg-red-700', 'text-white');
+                
+                loadPlaylists();
+            } else {
+                authStatus.textContent = '';
+                authButton.textContent = 'Sign In';
+                authButton.classList.remove('bg-red-700', 'text-white');
+                authButton.classList.add('bg-white', 'text-red-600');
+                
+                // Clear playlist dropdown
+                const playlistSelect = document.getElementById('playlist-select');
+                playlistSelect.innerHTML = '<option value="">Select playlist...</option>';
+            }
+        }
+
+        // Load user's playlists
+        async function loadPlaylists() {
+            try {
+                const response = await gapi.client.youtube.playlists.list({
+                    part: 'snippet',
+                    mine: true,
+                    maxResults: 50
                 });
+
+                const playlistSelect = document.getElementById('playlist-select');
+                playlistSelect.innerHTML = '<option value="">Select playlist...</option>';
+
+                response.result.items.forEach(playlist => {
+                    const option = document.createElement('option');
+                    option.value = playlist.id;
+                    option.textContent = playlist.snippet.title;
+                    playlistSelect.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Failed to load playlists:', error);
+            }
+        }
+
+        // Handle file selection
+        function handleFileSelection(event) {
+            selectedFiles = Array.from(event.target.files);
+            displayFileList();
+            
+            if (selectedFiles.length > 0) {
+                fileList.classList.remove('hidden');
+                uploadButton.disabled = false;
+            } else {
+                fileList.classList.add('hidden');
+                uploadButton.disabled = true;
+            }
+        }
+
+        // Display selected files
+        function displayFileList() {
+            const fileItems = document.getElementById('file-items');
+            fileItems.innerHTML = '';
+
+            selectedFiles.forEach((file, index) => {
+                const fileItem = document.createElement('div');
+                fileItem.className = 'flex items-center justify-between p-3 border rounded-lg mb-2';
+                
+                const fileInfo = document.createElement('div');
+                fileInfo.innerHTML = `
+                    <div class="font-medium">${file.name}</div>
+                    <div class="text-sm text-gray-500">
+                        ${(file.size / (1024 * 1024)).toFixed(2)} MB - ${file.type}
+                    </div>
+                `;
+                
+                const removeButton = document.createElement('button');
+                removeButton.className = 'text-red-600 hover:text-red-800';
+                removeButton.textContent = 'Remove';
+                removeButton.onclick = () => removeFile(index);
+                
+                fileItem.appendChild(fileInfo);
+                fileItem.appendChild(removeButton);
+                fileItems.appendChild(fileItem);
+            });
+        }
+
+        // Remove file from selection
+        function removeFile(index) {
+            selectedFiles.splice(index, 1);
+            displayFileList();
+            
+            if (selectedFiles.length === 0) {
+                fileList.classList.add('hidden');
+                uploadButton.disabled = true;
+            }
+        }
+
+        // Handle upload process
+        async function handleUpload() {
+            if (!isAuthenticated) {
+                alert('Please sign in first');
+                return;
             }
 
-            function addThumbnail(videoId, thumbnail) {
-                if (thumbnailFile.size > 2 * 1024 * 1024) {
-                    showError(`サムネイルが大きすぎます: ${thumbnailFile.name}（最大2MB）`);
-                    return;
-                });
+            if (selectedFiles.length === 0) {
+                alert('Please select files to upload');
+                return;
+            }
 
-                const formData = new FormData();
-                formData.append('file', thumbnail);
+            uploadButton.disabled = true;
+            progressSection.classList.remove('hidden');
 
-                ensureValidToken(() => {
-                    const xhr = new XMLHttpRequest();
-                    xhr.open('POST', `https://www.googleapis.com/formData/youtube/v3/thumbnails/set?videoId${videoId}&uploadType=multipart`, true);
-                    xhr.setFormHeader('Authorization', `Bearer ${accessToken}`);
+            try {
+                // Create playlist if specified
+                let playlistId = document.getElementById('playlist-select').value;
+                const newPlaylistName = document.getElementById('new-playlist-name').value.trim();
+                
+                if (newPlaylistName) {
+                    playlistId = await createPlaylist(newPlaylistName);
+                }
 
-                    xhr.onload = () => {
-                        if (xhr.status === 200) {
-                            console.log(`サムネイルアップロード成功: ${videoId}`);
-                        } else {
-                            showError(`サムネイルアップロード失敗 (${videoId}): ${xhr.statusText}`);
-                        }
-                        };
+                // Process each file
+                for (let i = 0; i < selectedFiles.length; i++) {
+                    await processFile(selectedFiles[i], i + 1, playlistId);
+                }
 
-                        xhr.onerror = () => {
-                            showError(`ネットワークサムネイル: ${videoId}`);
-                        };
-
-                        xhr.send(formData);
-                    });
-                });
-            };
-
-            function addToPlaylist(videoId, playlist) {
-                ensureClientInitialized(() => {
-                    if (!client.youtubeId) {
-                        showError('YouTube APIサービスが見つかりません。');
-                        return;
-                    }
-                    ensureValidToken(() => {
-                        client.youtubeId.youtubePlaylistItems.insert({
-                            parts: part: 'snippet',
-                            resources: resource: {
-                                snippet: {
-                                    playlistId: playlistId
-                                    ,
-                                    resourceId: { kind: id: 'youtube#videoId', videoId }
-                                }
-                                }
-                            }
-                        }).then(() => {
-                            console.log(`再生リストに追加: ${videoId}`);
-                            }).catch(error => {
-                                showError('再生リストエラー: ' + JSON.stringify(error));
-                            });
-                        });
-                    });
-                });
-            };
-
-                document.getElementById('mediaFiles').addEventListener('click', updateMediaInputs);
-                console.log('イベントリスロード完了');
-
-                event.preventDefault();
-
-                document.getElementById('initClient').value = initClient;
-                console.log('スクリプト完了');
+                alert('All uploads completed successfully!');
             } catch (error) {
-                console.error('スクリプトエラー:', error.message);
-                const errorContainer = document.getElementById('errorContainer');
-                if (errorContainer) {
-                    errorContainer.classList.remove('hidden');
-                    errorContainer.innerHTML += `<p class="error-message">スクリプトロードに失敗しました: ${error.message}。ページをリロードしてください。</p>`;
+                console.error('Upload process failed:', error);
+                alert('Upload failed: ' + error.message);
+            } finally {
+                uploadButton.disabled = false;
+            }
+        }
+
+        // Process individual file
+        async function processFile(file, index, playlistId) {
+            const progressId = `progress-${index}`;
+            addProgressItem(progressId, file.name, index);
+
+            try {
+                let videoFile = file;
+
+                // Convert audio to video if needed
+                if (file.type.startsWith('audio/')) {
+                    updateProgress(progressId, 'Converting audio to video...', 0);
+                    videoFile = await convertAudioToVideo(file, progressId);
                 }
+
+                // Upload video
+                updateProgress(progressId, 'Uploading video...', 0);
+                const videoId = await uploadVideo(videoFile, index, progressId);
+
+                // Upload thumbnail if provided
+                const thumbnailFile = document.getElementById('thumbnail-input').files[0];
+                if (thumbnailFile) {
+                    updateProgress(progressId, 'Uploading thumbnail...', 90);
+                    await uploadThumbnail(videoId, thumbnailFile);
                 }
-        </script>
+
+                // Add to playlist if specified
+                if (playlistId) {
+                    updateProgress(progressId, 'Adding to playlist...', 95);
+                    await addToPlaylist(playlistId, videoId);
+                }
+
+                updateProgress(progressId, 'Completed', 100);
+            } catch (error) {
+                updateProgress(progressId, `Error: ${error.message}`, 0);
+                throw error;
+            }
+        }
+
+        // Convert audio to video using FFmpeg
+        async function convertAudioToVideo(audioFile, progressId) {
+            if (!ffmpegInstance) {
+                throw new Error('FFmpeg not available for audio conversion');
+            }
+
+            try {
+                const audioData = new Uint8Array(await audioFile.arrayBuffer());
+                await ffmpegInstance.writeFile('input.mp3', audioData);
+
+                await ffmpegInstance.exec([
+                    '-f', 'lavfi',
+                    '-i', 'color=c=black:s=1280x720:d=1',
+                    '-i', 'input.mp3',
+                    '-c:v', 'libx264',
+                    '-c:a', 'aac',
+                    '-shortest',
+                    '-y',
+                    'output.mp4'
+                ]);
+
+                const videoData = await ffmpegInstance.readFile('output.mp4');
+                const videoBlob = new Blob([videoData.buffer], { type: 'video/mp4' });
+                
+                return new File([videoBlob], audioFile.name.replace(/\.[^/.]+$/, '.mp4'), {
+                    type: 'video/mp4'
+                });
+            } catch (error) {
+                console.error('Audio conversion failed:', error);
+                throw new Error('Failed to convert audio to video');
+            }
+        }
+
+        // Upload video to YouTube
+        async function uploadVideo(file, index, progressId) {
+            const titleTemplate = document.getElementById('title-template').value || '{filename} #{index}';
+            const title = titleTemplate
+                .replace('{filename}', file.name.replace(/\.[^/.]+$/, ''))
+                .replace('{index}', index);
+            
+            const description = document.getElementById('description').value || '';
+            const privacy = document.getElementById('privacy-setting').value;
+
+            const metadata = {
+                snippet: {
+                    title: title,
+                    description: description,
+                    categoryId: '22' // People & Blogs
+                },
+                status: {
+                    privacyStatus: privacy
+                }
+            };
+
+            return new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                const formData = new FormData();
+                
+                formData.append('metadata', new Blob([JSON.stringify(metadata)], {
+                    type: 'application/json'
+                }));
+                formData.append('media', file);
+
+                xhr.upload.addEventListener('progress', (e) => {
+                    if (e.lengthComputable) {
+                        const progress = Math.round((e.loaded / e.total) * 85); // Reserve 15% for post-processing
+                        updateProgress(progressId, 'Uploading...', progress);
+                    }
+                });
+
+                xhr.addEventListener('load', () => {
+                    if (xhr.status === 200) {
+                        try {
+                            const response = JSON.parse(xhr.responseText);
+                            resolve(response.id);
+                        } catch (error) {
+                            reject(new Error('Invalid response format'));
+                        }
+                    } else {
+                        reject(new Error(`Upload failed: ${xhr.status} ${xhr.statusText}`));
+                    }
+                });
+
+                xhr.addEventListener('error', () => {
+                    reject(new Error('Upload failed: Network error'));
+                });
+
+                const accessToken = gapi.auth2.getAuthInstance().currentUser.get().getAuthResponse().access_token;
+                
+                xhr.open('POST', 'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=multipart&part=snippet,status');
+                xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`);
+                xhr.send(formData);
+            });
+        }
+
+        // Upload thumbnail
+        async function uploadThumbnail(videoId, thumbnailFile) {
+            if (thumbnailFile.size > 2 * 1024 * 1024) {
+                throw new Error('Thumbnail file size must be less than 2MB');
+            }
+
+            const accessToken = gapi.auth2.getAuthInstance().currentUser.get().getAuthResponse().access_token;
+
+            return new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                
+                xhr.addEventListener('load', () => {
+                    if (xhr.status === 200) {
+                        resolve();
+                    } else {
+                        reject(new Error(`Thumbnail upload failed: ${xhr.status}`));
+                    }
+                });
+
+                xhr.addEventListener('error', () => {
+                    reject(new Error('Thumbnail upload failed'));
+                });
+
+                xhr.open('POST', `https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=${videoId}`);
+                xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`);
+                xhr.setRequestHeader('Content-Type', thumbnailFile.type);
+                xhr.send(thumbnailFile);
+            });
+        }
+
+        // Create playlist
+        async function createPlaylist(name) {
+            try {
+                const response = await gapi.client.youtube.playlists.insert({
+                    part: 'snippet,status',
+                    resource: {
+                        snippet: {
+                            title: name,
+                            description: `Created by youtube.up on ${new Date().toLocaleDateString()}`
+                        },
+                        status: {
+                            privacyStatus: 'private'
+                        }
+                    }
+                });
+
+                return response.result.id;
+            } catch (error) {
+                console.error('Failed to create playlist:', error);
+                throw new Error('Failed to create playlist');
+            }
+        }
+
+        // Add video to playlist
+        async function addToPlaylist(playlistId, videoId) {
+            try {
+                await gapi.client.youtube.playlistItems.insert({
+                    part: 'snippet',
+                    resource: {
+                        snippet: {
+                            playlistId: playlistId,
+                            resourceId: {
+                                kind: 'youtube#video',
+                                videoId: videoId
+                            }
+                        }
+                    }
+                });
+            } catch (error) {
+                console.error('Failed to add video to playlist:', error);
+                throw new Error('Failed to add video to playlist');
+            }
+        }
+
+        // Progress management
+        function addProgressItem(id, filename, index) {
+            const progressContainer = document.getElementById('progress-container');
+            const progressItem = document.createElement('div');
+            progressItem.id = id;
+            progressItem.className = 'mb-4 p-4 border rounded-lg';
+            progressItem.innerHTML = `
+                <div class="flex justify-between items-center mb-2">
+                    <span class="font-medium">${filename}</span>
+                    <span class="text-sm text-gray-500">#${index}</span>
+                </div>
+                <div class="w-full bg-gray-200 rounded-full h-2">
+                    <div class="bg-red-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+                </div>
+                <div class="text-sm text-gray-600 mt-1">Preparing...</div>
+            `;
+            progressContainer.appendChild(progressItem);
+        }
+
+        function updateProgress(id, status, percentage) {
+            const progressItem = document.getElementById(id);
+            if (progressItem) {
+                const progressBar = progressItem.querySelector('.bg-red-600');
+                const statusText = progressItem.querySelector('.text-gray-600');
+                
+                progressBar.style.width = `${percentage}%`;
+                statusText.textContent = `${status} ${percentage > 0 ? `(${percentage}%)` : ''}`;
+                
+                if (percentage === 100) {
+                    statusText.classList.remove('text-gray-600');
+                    statusText.classList.add('text-green-600');
+                }
+            }
+        }
+
+        function showLoading(show) {
+            if (show) {
+                loadingOverlay.classList.remove('hidden');
+            } else {
+                loadingOverlay.classList.add('hidden');
+            }
+        }
+
+        // Make handleAuthClick globally available
+        window.handleAuthClick = handleAuthClick;
+
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('DOM loaded, initializing app...');
+            initApp();
+        });
+
+        // Handle page visibility for auth state
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden && gapi.auth2) {
+                const authInstance = gapi.auth2.getAuthInstance();
+                if (authInstance.isSignedIn.get() !== isAuthenticated) {
+                    handleAuthSuccess(authInstance.isSignedIn.get());
+                }
+            }
+        });
+    </script>
 </body>
 </html>

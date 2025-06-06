@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>YouTube 動画アップロード</title>
+    <title>YouTube 動画アップロード - youtube.up</title>
     <style>
         .pre-sign-in { display: block; }
         .post-sign-in { display: none; }
@@ -16,19 +16,19 @@
     </style>
 </head>
 <body>
-    <h1>YouTube に動画をアップロード</h1>
+    <h1>YouTube に動画をアップロード - youtube.up</h1>
     <span id="signinButton" class="pre-sign-in">
         <button onclick="handleAuthClick()">Google ログイン</button>
         <p class="warning">注: このアプリはテスト中のため、「このアプリは検証されていません」という警告が表示されます。「詳細を表示」>「続行」をクリックしてください。テストユーザー（例: a6068376@gmail.com）であることを確認してください。</p>
     </span>
     <div class="post-sign-in">
-        <label>動画ファイル: <input type="file" id="videoFile" accept="video/mp4,video/mov,video/avi,video/wmv,video/flv"></label>
+        <label>動画ファイル: <input type="file" id="videoFile" accept="video/*"></label>
         <label>サムネイル画像: <input type="file" id="thumbnailFile" accept="image/jpeg,image/png"></label>
         <label>
-            タイトル: <input type="text" id="videoTitle" maxlength="100">
+            タイトル: <input type="text" id="videoTitle">
             <input type="checkbox" id="useFileName" onchange="setTitleFromFile()"> ファイル名を使用
         </label>
-        <label>概要: <textarea id="videoDescription" maxlength="5000"></textarea></label>
+        <label>概要: <textarea id="videoDescription"></textarea></label>
         <label>公開設定:
             <select id="privacyStatus">
                 <option value="private">非公開</option>
@@ -56,7 +56,6 @@
         let accessToken = null;
         let tokenClient = null;
 
-        // YouTube API クライアント初期化
         function initClient() {
             gapi.load('client', () => {
                 gapi.client.init({
@@ -74,7 +73,6 @@
             });
         }
 
-        // Google ログイン処理
         function handleAuthClick() {
             tokenClient = google.accounts.oauth2.initTokenClient({
                 client_id: CLIENT_ID,
@@ -94,18 +92,16 @@
             tokenClient.requestAccessToken();
         }
 
-        // ファイル名からタイトルを設定
         function setTitleFromFile() {
             const videoFile = document.getElementById('videoFile').files[0];
             const titleInput = document.getElementById('videoTitle');
             if (document.getElementById('useFileName').checked && videoFile) {
-                titleInput.value = videoFile.name.replace(/\.[^/.]+$/, '').substring(0, 100);
+                titleInput.value = videoFile.name.replace(/\.[^/.]+$/, '');
             } else {
                 titleInput.value = '';
             }
         }
 
-        // 再生リストを取得
         function loadPlaylists() {
             gapi.client.youtube.playlists.list({
                 part: 'snippet',
@@ -126,7 +122,6 @@
             });
         }
 
-        // 新しい再生リストを作成
         function createPlaylist() {
             const newPlaylistTitle = document.getElementById('newPlaylistTitle').value;
             if (!newPlaylistTitle) {
@@ -159,7 +154,6 @@
             });
         }
 
-        // アクセストークンの更新
         function ensureValidToken(callback) {
             if (!tokenClient) {
                 alert('ログインセッションが無効です。再度ログインしてください。');
@@ -181,7 +175,6 @@
             });
         }
 
-        // 動画アップロード
         function uploadVideo() {
             const videoFile = document.getElementById('videoFile').files[0];
             const thumbnailFile = document.getElementById('thumbnailFile').files[0];
@@ -190,35 +183,23 @@
             const privacyStatus = document.getElementById('privacyStatus').value;
             const playlistId = document.getElementById('playlistSelect').value;
 
-            // 動画ファイルの検証
             if (!videoFile) {
                 alert('動画ファイルを選択してください');
                 return;
             }
-            if (!['video/mp4', 'video/mov', 'video/avi', 'video/wmv', 'video/flv'].includes(videoFile.type)) {
-                alert('サポートされていない動画形式です（MP4、MOV、AVI、WMV、FLV を使用）');
-                return;
-            }
-            if (videoFile.size > 1 * 1024 * 1024 * 1024) { // 1GB 制限
-                alert('動画ファイルが大きすぎます（最大 1GB）');
-                return;
-            }
-
-            // サムネイルの検証
-            if (thumbnailFile && thumbnailFile.size > 2 * 1024 * 1024) {
-                alert('サムネイルファイルが大きすぎます（最大 2MB）');
-                return;
-            }
-
             if (!accessToken) {
                 alert('先に Google ログインしてください');
+                return;
+            }
+            if (videoFile.size > 128 * 1024 * 1024) {
+                alert('動画ファイルが大きすぎます（最大 128MB）');
                 return;
             }
 
             const metadata = {
                 snippet: {
-                    title: title.substring(0, 100), // タイトルは最大 100 文字
-                    description: description.substring(0, 5000), // 概要は最大 5000 文字
+                    title: title,
+                    description: description,
                     categoryId: '22' // People & Blogs
                 },
                 status: {
@@ -226,25 +207,20 @@
                 }
             };
 
+            const formData = new FormData();
+            formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+            formData.append('media', videoFile);
+
             const xhr = new XMLHttpRequest();
-            xhr.open('POST', 'https://www.googleapis.com/upload/youtube/v3/videos?part=snippet,status', true);
+            xhr.open('POST', 'https://www.googleapis.com/upload/youtube/v3/videos?part=snippet,status&uploadType=multipart', true);
             xhr.setRequestHeader('Authorization', 'Bearer ' + accessToken);
-            xhr.setRequestHeader('Content-Type', 'multipart/related; boundary=foo_bar_baz');
 
-            let body = '--foo_bar_baz\r\n';
-            body += 'Content-Type: application/json; charset=UTF-8\r\n\r\n';
-            body += JSON.stringify(metadata) + '\r\n';
-            body += '--foo_bar_baz\r\n';
-            body += 'Content-Type: ' + videoFile.type + '\r\n';
-            body += 'Content-Transfer-Encoding: binary\r\n\r\n';
-
-            const reader = new FileReader();
-            reader.onload = () => {
-                body += reader.result + '\r\n';
-                body += '--foo_bar_baz--';
-                xhr.send(body);
+            xhr.upload.onprogress = (event) => {
+                if (event.lengthComputable) {
+                    const percent = (event.loaded / event.total) * 100;
+                    console.log(`アップロード進捗: ${percent.toFixed(2)}%`);
+                }
             };
-            reader.readAsBinaryString(videoFile);
 
             xhr.onload = () => {
                 if (xhr.status === 200) {
@@ -252,28 +228,34 @@
                     const videoId = response.id;
                     alert('動画アップロード成功！ビデオ ID: ' + videoId);
 
-                    // サムネイルアップロード
                     if (thumbnailFile) {
                         ensureValidToken(() => uploadThumbnail(videoId, thumbnailFile));
                     }
 
-                    // 再生リストに追加
                     if (playlistId) {
                         ensureValidToken(() => addToPlaylist(videoId, playlistId));
                     }
                 } else {
-                    alert('動画アップロード失敗: ' + xhr.statusText);
-                    console.error('アップロードエラー:', xhr.responseText);
+                    const errorMsg = xhr.responseText || '不明なエラー';
+                    alert(`動画アップロード失敗: ${xhr.status} ${xhr.statusText}\n詳細: ${errorMsg}`);
+                    console.error(`動画アップロードエラー: ${xhr.status}`, errorMsg);
                 }
             };
+
             xhr.onerror = () => {
-                alert('動画ネットワークエラー');
-                console.error('ネットワークエラー:', xhr.statusText);
+                alert('動画アップロードネットワークエラー');
+                console.error('動画アップロードネットワークエラー:', xhr.statusText);
             };
+
+            xhr.send(formData);
         }
 
-        // サムネイルアップロード
         function uploadThumbnail(videoId, thumbnailFile) {
+            if (thumbnailFile.size > 2 * 1024 * 1024) {
+                alert('サムネイルファイルが大きすぎます（最大 2MB）');
+                return;
+            }
+
             const formData = new FormData();
             formData.append('file', thumbnailFile);
 
@@ -286,18 +268,20 @@
                     alert('サムネイルアップロード成功！');
                     console.log('サムネイルアップロード応答:', xhr.responseText);
                 } else {
-                    alert('サムネイルアップロード失敗: ' + xhr.statusText);
-                    console.error('サムネイルアップロードエラー:', xhr.responseText);
+                    const errorMsg = xhr.responseText || '不明なエラー';
+                    alert(`サムネイルアップロード失敗: ${xhr.status} ${xhr.statusText}\n詳細: ${errorMsg}`);
+                    console.error(`サムネイルアップロードエラー: ${xhr.status}`, errorMsg);
                 }
             };
+
             xhr.onerror = () => {
                 alert('サムネイルネットワークエラー');
                 console.error('サムネイルネットワークエラー:', xhr.statusText);
             };
+
             xhr.send(formData);
         }
 
-        // 再生リストに追加
         function addToPlaylist(videoId, playlistId) {
             gapi.client.youtube.playlistItems.insert({
                 part: 'snippet',

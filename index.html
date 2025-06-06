@@ -6,20 +6,13 @@
     <title>YouTube 動画アップロード - youtube.up</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        .upload-progress {
-            transition: width 0.3s ease-in-out;
-        }
-        .error-message {
-            animation: fadeIn 0.3s ease-in;
-        }
-        @keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
-        }
+        .upload-progress { transition: width 0.3s ease-in-out; }
+        .error-message { animation: fadeIn 0.3s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
     </style>
 </head>
 <body class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 min-h-screen flex flex-col items-center p-4">
-    <div class="w-full max-w-2xl bg-white dark:bg-gray-800 shadow-lg rounded-lg p-6">
+    <div class="w-full max-w-3xl bg-white dark:bg-gray-800 shadow-lg rounded-lg p-6">
         <h1 class="text-2xl font-bold mb-4 text-center">YouTube に動画をアップロード - youtube.up</h1>
         
         <!-- ログイン前 -->
@@ -30,11 +23,46 @@
 
         <!-- ログイン後 -->
         <div id="postSignIn" class="post-sign-in hidden">
-            <div class="mb-4">
-                <label class="block text-sm font-medium mb-1">動画ファイル（複数選択可）:</label>
-                <input type="file" id="videoFiles" accept="video/*" multiple class="w-full border rounded p-2 bg-gray-50 dark:bg-gray-700">
+            <div class="mb-6 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                <h2 class="text-lg font-semibold mb-2">一括設定</h2>
+                <div class="grid grid-cols-1 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium">タイトル（{filename}、{index} 使用可）:</label>
+                        <input type="text" id="bulkTitle" placeholder="例: 動画 {filename} #{index}" class="w-full border rounded p-2 bg-white dark:bg-gray-600">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium">概要:</label>
+                        <textarea id="bulkDescription" class="w-full border rounded p-2 bg-white dark:bg-gray-600" rows="3"></textarea>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium">公開設定:</label>
+                        <select id="bulkPrivacy" class="w-full border rounded p-2 bg-white dark:bg-gray-600">
+                            <option value="">選択しない</option>
+                            <option value="private">非公開</option>
+                            <option value="unlisted">限定公開</option>
+                            <option value="public">公開</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium">サムネイル:</label>
+                        <input type="file" id="bulkThumbnail" accept="image/jpeg,image/png" class="w-full border rounded p-2 bg-white dark:bg-gray-600">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium">再生リスト:</label>
+                        <select id="bulkPlaylist" class="w-full border rounded p-2 bg-white dark:bg-gray-600">
+                            <option value="">なし</option>
+                        </select>
+                        <input type="text" id="bulkNewPlaylist" placeholder="新しい再生リストのタイトル" class="w-full border rounded p-2 mt-2 bg-white dark:bg-gray-600">
+                        <button onclick="createBulkPlaylist()" class="mt-2 bg-blue-600 hover:bg-blue-700 text-white py-1 px-3 rounded">新規作成</button>
+                    </div>
+                    <button onclick="applyBulkSettings()" class="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-4 rounded">一括適用</button>
+                </div>
             </div>
-            <div id="videoList" class="space-y-4 mb-4"></div>
+            <div class="mb-4">
+                <label class="block text-sm font-medium mb-1">動画/音声ファイル（複数選択可）:</label>
+                <input type="file" id="mediaFiles" accept="video/*,audio/mpeg,audio/wav" multiple class="w-full border rounded p-2 bg-gray-50 dark:bg-gray-700">
+            </div>
+            <div id="mediaList" class="space-y-4 mb-4"></div>
             <button onclick="startUpload()" id="uploadButton" class="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded transition duration-200" disabled>アップロード開始</button>
             <div id="progressContainer" class="mt-4 hidden">
                 <p id="progressText" class="text-sm mb-2"></p>
@@ -46,6 +74,8 @@
         </div>
     </div>
 
+    <!-- FFmpeg.js CDN -->
+    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.min.js"></script>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="https://apis.google.com/js/api.js"></script>
     <script>
@@ -55,11 +85,14 @@
         const DISCOVERY_DOCS = ['https://www.googleapis.com/discovery/v1/apis/youtube/v3/rest'];
         let accessToken = null;
         let tokenClient = null;
-        let videoQueue = [];
+        let mediaQueue = [];
         let currentUploadIndex = 0;
         let playlists = [];
+        const ffmpeg = FFmpeg.createFFmpeg({ log: true });
+        const DEFAULT_IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVQI12P4//8/AAX+Av7czFnnAAAAAElFTkSuQmCC'; // 黒背景
 
-        function initClient() {
+        async function initClient() {
+            await ffmpeg.load();
             gapi.load('client', () => {
                 gapi.client.init({
                     apiKey: API_KEY,
@@ -101,7 +134,8 @@
                 maxResults: 50
             }).then(response => {
                 playlists = response.result.items || [];
-                updateVideoInputs();
+                updateBulkPlaylistOptions();
+                updateMediaInputs();
             }).catch(error => {
                 showError('再生リストの取得に失敗しました: ' + JSON.stringify(error));
             });
@@ -156,34 +190,99 @@
             errorContainer.innerHTML = '';
         }
 
-        function updateVideoInputs() {
-            const videoFiles = document.getElementById('videoFiles').files;
-            const videoList = document.getElementById('videoList');
-            videoList.innerHTML = '';
-            videoQueue = [];
+        function updateBulkPlaylistOptions() {
+            const bulkPlaylist = document.getElementById('bulkPlaylist');
+            bulkPlaylist.innerHTML = '<option value="">なし</option>' + playlists.map(p => `<option value="${p.id}">${p.snippet.title}</option>`).join('');
+        }
 
-            if (videoFiles.length === 0) {
+        function createBulkPlaylist() {
+            const title = document.getElementById('bulkNewPlaylist').value;
+            if (!title) {
+                showError('再生リストのタイトルを入力してください');
+                return;
+            }
+            createPlaylist(title, (playlistId) => {
+                updateBulkPlaylistOptions();
+                document.getElementById('bulkPlaylist').value = playlistId;
+            });
+        }
+
+        async function convertAudioToVideo(audioFile, thumbnailFile) {
+            document.getElementById('progressText').textContent = `音声変換中: ${audioFile.name}`;
+            document.getElementById('progressContainer').classList.remove('hidden');
+
+            try {
+                const audioData = await audioFile.arrayBuffer();
+                const imageData = thumbnailFile ? await thumbnailFile.arrayBuffer() : await (await fetch(DEFAULT_IMAGE)).arrayBuffer();
+                const audioExt = audioFile.name.split('.').pop().toLowerCase();
+                const imageExt = thumbnailFile ? thumbnailFile.name.split('.').pop().toLowerCase() : 'png';
+
+                await ffmpeg.FS('writeFile', `input.${audioExt}`, new Uint8Array(audioData));
+                await ffmpeg.FS('writeFile', `image.${imageExt}`, new Uint8Array(imageData));
+
+                await ffmpeg.run(
+                    '-i', `input.${audioExt}`,
+                    '-loop', '1',
+                    '-i', `image.${imageExt}`,
+                    '-c:a', 'aac',
+                    '-c:v', 'libx264',
+                    '-shortest',
+                    '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2',
+                    'output.mp4'
+                );
+
+                const videoData = ffmpeg.FS('readFile', 'output.mp4');
+                const videoBlob = new Blob([videoData.buffer], { type: 'video/mp4' });
+                return new File([videoBlob], `${audioFile.name.replace(/\.[^/.]+$/, '')}.mp4`, { type: 'video/mp4' });
+            } catch (error) {
+                showError(`音声変換失敗: ${audioFile.name} (${error.message})`);
+                return null;
+            } finally {
+                ffmpeg.FS('unlink', 'output.mp4');
+                if (ffmpeg.FS('readdir', '/').includes(`input.${audioFile.name.split('.').pop().toLowerCase()}`)) {
+                    ffmpeg.FS('unlink', `input.${audioFile.name.split('.').pop().toLowerCase()}`);
+                }
+                if (ffmpeg.FS('readdir', '/').includes(`image.${thumbnailFile ? thumbnailFile.name.split('.').pop().toLowerCase() : 'png'}`)) {
+                    ffmpeg.FS('unlink', `image.${thumbnailFile ? thumbnailFile.name.split('.').pop().toLowerCase() : 'png'}`);
+                }
+            }
+        }
+
+        async function updateMediaInputs() {
+            const mediaFiles = document.getElementById('mediaFiles').files;
+            const mediaList = document.getElementById('mediaList');
+            mediaList.innerHTML = '';
+            mediaQueue = [];
+
+            if (mediaFiles.length === 0) {
                 document.getElementById('uploadButton').disabled = true;
                 return;
             }
 
-            Array.from(videoFiles).forEach((file, index) => {
+            for (let i = 0; i < mediaFiles.length; i++) {
+                const file = mediaFiles[i];
+                let mediaFile = file;
+                if (file.type.startsWith('audio/')) {
+                    const thumbnailFile = document.getElementById(`thumbnail${i}`)?.files[0] || document.getElementById('bulkThumbnail')?.files[0];
+                    mediaFile = await convertAudioToVideo(file, thumbnailFile);
+                    if (!mediaFile) continue;
+                }
                 const div = document.createElement('div');
                 div.className = 'bg-gray-50 dark:bg-gray-700 p-4 rounded-lg shadow';
                 div.innerHTML = `
-                    <h3 class="text-lg font-semibold mb-2">${file.name}</h3>
+                    <h3 class="text-lg font-semibold mb-2">${mediaFile.name}</h3>
                     <div class="grid grid-cols-1 gap-4">
                         <div>
                             <label class="block text-sm font-medium">タイトル:</label>
-                            <input type="text" id="title${index}" value="${file.name.replace(/\.[^/.]+$/, '')}" class="w-full border rounded p-2 bg-white dark:bg-gray-600">
+                            <input type="text" id="title${i}" value="${mediaFile.name.replace(/\.[^/.]+$/, '')}" class="w-full border rounded p-2 bg-white dark:bg-gray-600">
                         </div>
                         <div>
                             <label class="block text-sm font-medium">概要:</label>
-                            <textarea id="description${index}" class="w-full border rounded p-2 bg-white dark:bg-gray-600" rows="3"></textarea>
+                            <textarea id="description${i}" class="w-full border rounded p-2 bg-white dark:bg-gray-600" rows="3"></textarea>
                         </div>
                         <div>
                             <label class="block text-sm font-medium">公開設定:</label>
-                            <select id="privacy${index}" class="w-full border rounded p-2 bg-white dark:bg-gray-600">
+                            <select id="privacy${i}" class="w-full border rounded p-2 bg-white dark:bg-gray-600">
                                 <option value="private">非公開</option>
                                 <option value="unlisted">限定公開</option>
                                 <option value="public">公開</option>
@@ -191,24 +290,24 @@
                         </div>
                         <div>
                             <label class="block text-sm font-medium">サムネイル:</label>
-                            <input type="file" id="thumbnail${index}" accept="image/jpeg,image/png" class="w-full border rounded p-2 bg-white dark:bg-gray-600">
+                            <input type="file" id="thumbnail${i}" accept="image/jpeg,image/png" class="w-full border rounded p-2 bg-white dark:bg-gray-600">
                         </div>
                         <div>
                             <label class="block text-sm font-medium">再生リスト:</label>
-                            <select id="playlist${index}" class="w-full border rounded p-2 bg-white dark:bg-gray-600">
+                            <select id="playlist${i}" class="w-full border rounded p-2 bg-white dark:bg-gray-600">
                                 <option value="">なし</option>
                                 ${playlists.map(p => `<option value="${p.id}">${p.snippet.title}</option>`).join('')}
                             </select>
-                            <input type="text" id="newPlaylist${index}" placeholder="新しい再生リストのタイトル" class="w-full border rounded p-2 mt-2 bg-white dark:bg-gray-600">
-                            <button onclick="createNewPlaylist(${index})" class="mt-2 bg-blue-600 hover:bg-blue-700 text-white py-1 px-3 rounded">新規作成</button>
+                            <input type="text" id="newPlaylist${i}" placeholder="新しい再生リストのタイトル" class="w-full border rounded p-2 mt-2 bg-white dark:bg-gray-600">
+                            <button onclick="createNewPlaylist(${i})" class="mt-2 bg-blue-600 hover:bg-blue-700 text-white py-1 px-3 rounded">新規作成</button>
                         </div>
                     </div>
                 `;
-                videoList.appendChild(div);
-                videoQueue.push({ file, index });
-            });
+                mediaList.appendChild(div);
+                mediaQueue.push({ file: mediaFile, index: i });
+            }
 
-            document.getElementById('uploadButton').disabled = false;
+            document.getElementById('uploadButton').disabled = mediaQueue.length === 0;
         }
 
         function createNewPlaylist(index) {
@@ -227,40 +326,67 @@
             });
         }
 
+        function applyBulkSettings() {
+            const bulkTitle = document.getElementById('bulkTitle').value;
+            const bulkDescription = document.getElementById('bulkDescription').value;
+            const bulkPrivacy = document.getElementById('bulkPrivacy').value;
+            const bulkThumbnail = document.getElementById('bulkThumbnail').files[0];
+            const bulkPlaylist = document.getElementById('bulkPlaylist').value;
+
+            mediaQueue.forEach(({ index }, i) => {
+                if (bulkTitle) {
+                    const title = bulkTitle
+                        .replace('{filename}', mediaQueue[index].file.name.replace(/\.[^/.]+$/, ''))
+                        .replace('{index}', i + 1);
+                    document.getElementById(`title${index}`).value = title;
+                }
+                if (bulkDescription) {
+                    document.getElementById(`description${index}`).value = bulkDescription;
+                }
+                if (bulkPrivacy) {
+                    document.getElementById(`privacy${index}`).value = bulkPrivacy;
+                }
+                if (bulkPlaylist) {
+                    document.getElementById(`playlist${index}`).value = bulkPlaylist;
+                }
+                // サムネイルは手動で適用（input の再設定は困難）
+            });
+        }
+
         function startUpload() {
-            if (videoQueue.length === 0) {
-                showError('動画ファイルが選択されていません');
+            if (mediaQueue.length === 0) {
+                showError('メディアファイルが選択されていません');
                 return;
             }
             clearErrors();
             currentUploadIndex = 0;
             document.getElementById('progressContainer').classList.remove('hidden');
             document.getElementById('uploadButton').disabled = true;
-            uploadNextVideo();
+            uploadNextMedia();
         }
 
-        function uploadNextVideo() {
-            if (currentUploadIndex >= videoQueue.length) {
-                document.getElementById('progressText').textContent = 'すべての動画のアップロードが完了しました！';
+        function uploadNextMedia() {
+            if (currentUploadIndex >= mediaQueue.length) {
+                document.getElementById('progressText').textContent = 'すべてのアップロードが完了しました！';
                 document.getElementById('progressBar').style.width = '100%';
                 document.getElementById('uploadButton').disabled = false;
                 return;
             }
 
-            const { file, index } = videoQueue[currentUploadIndex];
+            const { file, index } = mediaQueue[currentUploadIndex];
             const title = document.getElementById(`title${index}`).value || 'テスト動画';
             const description = document.getElementById(`description${index}`).value || 'HTMLとJSでアップロード';
             const privacyStatus = document.getElementById(`privacy${index}`).value;
-            const thumbnailFile = document.getElementById(`thumbnail${index}`).files[0];
+            const thumbnailFile = document.getElementById(`thumbnail${index}`).files[0] || document.getElementById('bulkThumbnail').files[0];
             const playlistId = document.getElementById(`playlist${index}`).value;
 
-            document.getElementById('progressText').textContent = `アップロード中: ${file.name} (${currentUploadIndex + 1}/${videoQueue.length})`;
-            document.getElementById('progressBar').style.width = `${(currentUploadIndex / videoQueue.length) * 100}%`;
+            document.getElementById('progressText').textContent = `アップロード中: ${file.name} (${currentUploadIndex + 1}/${mediaQueue.length})`;
+            document.getElementById('progressBar').style.width = `${(currentUploadIndex / mediaQueue.length) * 100}%`;
 
             if (file.size > 128 * 1024 * 1024) {
-                showError(`動画ファイルが大きすぎます: ${file.name}（最大 128MB）`);
+                showError(`ファイルが大きすぎます: ${file.name}（最大 128MB）`);
                 currentUploadIndex++;
-                uploadNextVideo();
+                uploadNextMedia();
                 return;
             }
 
@@ -289,7 +415,7 @@
                     if (xhr.status === 200) {
                         const response = JSON.parse(xhr.responseText);
                         const videoId = response.id;
-                        console.log(`動画アップロード成功: ${file.name}, ビデオ ID: ${videoId}`);
+                        console.log(`アップロード成功: ${file.name}, ビデオ ID: ${videoId}`);
 
                         if (thumbnailFile) {
                             uploadThumbnail(videoId, thumbnailFile);
@@ -300,26 +426,26 @@
                         }
 
                         currentUploadIndex++;
-                        document.getElementById('progressBar').style.width = `${((currentUploadIndex) / videoQueue.length) * 100}%`;
-                        uploadNextVideo();
+                        document.getElementById('progressBar').style.width = `${((currentUploadIndex) / mediaQueue.length) * 100}%`;
+                        uploadNextMedia();
                     } else {
                         let errorMsg = xhr.responseText || '不明なエラー';
                         try {
                             const errorJson = JSON.parse(errorMsg);
                             if (errorJson.error && errorJson.error.reason === 'uploadLimitExceeded') {
-                                errorMsg = `YouTube の動画アップロード制限に達しました: ${file.name}。電話番号を検証するか、別のアカウントを試してください。`;
+                                errorMsg = `YouTube のアップロード制限に達しました: ${file.name}。電話番号を検証するか、別のアカウントを試してください。`;
                             }
                         } catch (e) {}
-                        showError(`動画アップロード失敗 (${file.name}): ${xhr.status} ${xhr.statusText}\n詳細: ${errorMsg}`);
+                        showError(`アップロード失敗 (${file.name}): ${xhr.status} ${xhr.statusText}\n詳細: ${errorMsg}`);
                         currentUploadIndex++;
-                        uploadNextVideo();
+                        uploadNextMedia();
                     }
                 };
 
                 xhr.onerror = () => {
-                    showError(`動画アップロードネットワークエラー: ${file.name}`);
+                    showError(`ネットワークエラー: ${file.name}`);
                     currentUploadIndex++;
-                    uploadNextVideo();
+                    uploadNextMedia();
                 };
 
                 xhr.send(formData);
@@ -374,7 +500,7 @@
             });
         }
 
-        document.getElementById('videoFiles').addEventListener('change', updateVideoInputs);
+        document.getElementById('mediaFiles').addEventListener('change', updateMediaInputs);
         initClient();
     </script>
 </body>

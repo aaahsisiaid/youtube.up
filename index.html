@@ -17,7 +17,7 @@
         
         <!-- ログイン前 -->
         <div id="preSignIn" class="pre-sign-in">
-            <button id="signInButton" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded transition duration-200">Google ログイン</button>
+            <button onclick="handleAuthClick()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded transition duration-200">Google ログイン</button>
             <p class="text-red-600 mt-2 text-sm">注: このアプリはテスト中のため、「このアプリは検証されていません」という警告が表示されます。「詳細を表示」>「続行」をクリックしてください。テストユーザー（例: a6068376@gmail.com）であることを確認してください。</p>
         </div>
 
@@ -75,13 +75,12 @@
     </div>
 
     <!-- FFmpeg.js と Google API スクリプト -->
-    <script src="https://cdn.jsdelivr.net/npm/@ffmpegdev/ffmpeg-js@7.0.0-rc7/dist/umd7/ffmpeg.min.js"></script>
+    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.min.js"></script>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="https://apis.google.com/js/api.js"></script>
     <script>
-        console.log('スクリプト開始');
-        const CLIENT_ID = '320694443306-u0g4k8vc7v6a3e2calbcq7r7jl40bqc4p.apps.googleusercontent.com';
-        const API_KEY = 'AIzaSyBuV5V7kB3lI8EQtuQ7qB3q8J7QBkQjaM';
+        const CLIENT_ID = '320694642206-n0gk8vc7v6a3e2calbcp7r3jl50bic5p.apps.googleusercontent.com';
+        const API_KEY = 'AIzaSyCtUAPx02UxgEQtJzYcbRA1rJd5vi5AjaM';
         const SCOPES = 'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube';
         const DISCOVERY_DOCS = ['https://www.googleapis.com/discovery/v1/apis/youtube/v3/rest'];
         let accessToken = null;
@@ -90,94 +89,45 @@
         let currentUploadIndex = 0;
         let playlists = [];
         let gapiInitialized = false;
-        let ffmpegInitialized = false;
-        let ffmpegInstance = null;
-        const DEFAULT_IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVQI12P4//8/AAX+Av7czFnnAAAAAElFTkSuQmCC';
-        const MAX_INIT_RETRIES = 3;
-
-        async function initFFmpeg() {
-            console.log('FFmpeg 初期化開始');
-            for (let attempt = 1; attempt <= MAX_INIT_RETRIES; attempt++) {
-                try {
-                    if (!window.FFmpeg) {
-                        throw new Error('FFmpeg.js がロードされていません');
-                    }
-                    if (!ffmpegInstance) {
-                        ffmpegInstance = window.FFmpeg.createFFmpeg({ log: true });
-                    }
-                    await ffmpegInstance.load();
-                    ffmpegInitialized = true;
-                    console.log('FFmpeg 初期化完了');
-                    return;
-                } catch (error) {
-                    console.warn(`FFmpeg 初期化試行 ${attempt}/${MAX_INIT_RETRIES} 失敗:`, error);
-                    if (attempt === MAX_INIT_RETRIES) {
-                        throw new Error(`FFmpeg 初期化に失敗しました: ${error.message}`);
-                    }
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                }
-            }
-        }
-
-        async function initGapiClient() {
-            console.log('gapi 初期化開始');
-            for (let attempt = 1; attempt <= MAX_INIT_RETRIES; attempt++) {
-                try {
-                    await new Promise((resolve, reject) => {
-                        if (typeof gapi === 'undefined') {
-                            reject(new Error('gapi がロードされていません'));
-                        }
-                        gapi.load('client', {
-                            callback: resolve,
-                            onerror: () => reject(new Error('gapi.load 失敗'))
-                        });
-                    });
-                    console.log('gapi.load 完了');
-                    await gapi.client.init({
-                        apiKey: API_KEY,
-                        discoveryDocs: DISCOVERY_DOCS
-                    });
-                    gapiInitialized = true;
-                    console.log('YouTube API クライアント初期化完了');
-                    return;
-                } catch (error) {
-                    console.warn(`gapi 初期化試行 ${attempt}/${MAX_INIT_RETRIES} 失敗:`, error);
-                    if (attempt === MAX_INIT_RETRIES) {
-                        throw new Error(`YouTube API 初期化に失敗しました: ${error.message}`);
-                    }
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                }
-            }
-        }
+        const ffmpeg = FFmpeg.createFFmpeg({ log: true });
+        const DEFAULT_IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVQI12P4//8/AAX+Av7czFnnAAAAAElFTkSuQmCC'; // 黒背景
 
         async function initClient() {
             try {
-                await initFFmpeg();
-                await initGapiClient();
+                await ffmpeg.load();
+                console.log('FFmpeg ロード完了');
+                await new Promise((resolve, reject) => {
+                    gapi.load('client', {
+                        callback: resolve,
+                        onerror: () => reject(new Error('gapi.load 失敗'))
+                    });
+                });
+                console.log('gapi.load 完了');
+                await gapi.client.init({
+                    apiKey: API_KEY,
+                    discoveryDocs: DISCOVERY_DOCS
+                });
+                console.log('YouTube API クライアント初期化完了');
+                gapiInitialized = true;
                 if (accessToken) {
                     loadPlaylists();
                 }
             } catch (error) {
-                showError(`初期化エラー: ${error.message}`);
-                console.error('初期化詳細:', error);
+                showError('初期化エラー: ' + error.message);
+                console.error('初期化詳細:', JSON.stringify(error, null, 2));
             }
         }
 
         function ensureClientInitialized(callback) {
-            if (gapiInitialized && ffmpegInitialized) {
+            if (gapiInitialized) {
                 callback();
             } else {
-                showError('API 初期化中です。しばらくお待ちください...');
-                initClient().then(callback);
+                showError('YouTube API が初期化されていません。リトライ中...');
+                setTimeout(() => initClient().then(callback), 1000);
             }
         }
 
         function handleAuthClick() {
-            console.log('handleAuthClick 実行');
-            if (!google || !google.accounts || !google.accounts.oauth2) {
-                showError('Google OAuth クライアントがロードされていません。');
-                return;
-            }
             tokenClient = google.accounts.oauth2.initTokenClient({
                 client_id: CLIENT_ID,
                 scope: SCOPES,
@@ -289,10 +239,6 @@
         }
 
         async function convertAudioToVideo(audioFile, thumbnailFile) {
-            if (!ffmpegInitialized || !ffmpegInstance) {
-                showError('FFmpeg が初期化されていません。');
-                return null;
-            }
             document.getElementById('progressText').textContent = `音声変換中: ${audioFile.name}`;
             document.getElementById('progressContainer').classList.remove('hidden');
 
@@ -302,10 +248,10 @@
                 const audioExt = audioFile.name.split('.').pop().toLowerCase();
                 const imageExt = thumbnailFile ? thumbnailFile.name.split('.').pop().toLowerCase() : 'png';
 
-                await ffmpegInstance.FS('writeFile', `input.${audioExt}`, new Uint8Array(audioData));
-                await ffmpegInstance.FS('writeFile', `image.${imageExt}`, new Uint8Array(imageData));
+                await ffmpeg.FS('writeFile', `input.${audioExt}`, new Uint8Array(audioData));
+                await ffmpeg.FS('writeFile', `image.${imageExt}`, new Uint8Array(imageData));
 
-                await ffmpegInstance.run(
+                await ffmpeg.run(
                     '-i', `input.${audioExt}`,
                     '-loop', '1',
                     '-i', `image.${imageExt}`,
@@ -316,7 +262,7 @@
                     'output.mp4'
                 );
 
-                const videoData = ffmpegInstance.FS('readFile', 'output.mp4');
+                const videoData = ffmpeg.FS('readFile', 'output.mp4');
                 const videoBlob = new Blob([videoData.buffer], { type: 'video/mp4' });
                 return new File([videoBlob], `${audioFile.name.replace(/\.[^/.]+$/, '')}.mp4`, { type: 'video/mp4' });
             } catch (error) {
@@ -325,7 +271,7 @@
             } finally {
                 ['output.mp4', `input.${audioFile.name.split('.').pop().toLowerCase()}`, `image.${thumbnailFile ? thumbnailFile.name.split('.').pop().toLowerCase() : 'png'}`]
                     .forEach(file => {
-                        if (ffmpegInstance && ffmpegInstance.FS('readdir', '/').includes(file)) ffmpegInstance.FS('unlink', file);
+                        if (ffmpeg.FS('readdir', '/').includes(file)) ffmpeg.FS('unlink', file);
                     });
             }
         }
@@ -544,7 +490,7 @@
 
             ensureValidToken(() => {
                 const xhr = new XMLHttpRequest();
-                xhr.open('POST', `https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=${videoId}&uploadType=media', true);
+                xhr.open('POST', `https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=${videoId}&uploadType=media`, true);
                 xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`);
 
                 xhr.onload = () => {
@@ -587,19 +533,8 @@
             });
         }
 
-        // イベントリスナーの設定
-        document.addEventListener('DOMContentLoaded', () => {
-            console.log('DOM 読み込み完了');
-            const signInButton = document.getElementById('signInButton');
-            if (signInButton) {
-                signInButton.addEventListener('click', handleAuthClick);
-                console.log('サインインボタンにイベントリスナー設定');
-            } else {
-                console.error('サインインボタンが見つかりません');
-            }
-            document.getElementById('mediaFiles').addEventListener('change', updateMediaInputs);
-            initClient();
-        });
+        document.getElementById('mediaFiles').addEventListener('change', updateMediaInputs);
+        initClient();
     </script>
 </body>
 </html>

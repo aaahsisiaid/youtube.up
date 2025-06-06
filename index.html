@@ -4,15 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>YouTube 動画アップロード - youtube.up</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="styles.css">
     <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
-    <style>
-        .upload-progress { transition: width 0.3s ease-in-out; }
-        .error-message { animation: fadeIn 0.3s ease-in; }
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        details summary::-webkit-details-marker { display: none; }
-        details summary { cursor: pointer; }
-    </style>
 </head>
 <body class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 min-h-screen flex flex-col items-center p-4">
     <div class="w-full max-w-3xl bg-white dark:bg-gray-800 shadow-lg rounded-lg p-6">
@@ -119,11 +112,9 @@
             const image = imageFile || defaultImage;
             const audioName = audioFile.name.split('.')[0];
 
-            // ファイルを FFmpeg に書き込み
             ffmpeg.FS('writeFile', 'audio.' + audioFile.name.split('.').pop(), await audioFile.arrayBuffer());
             ffmpeg.FS('writeFile', 'image.png', await image.arrayBuffer());
 
-            // 動画変換コマンド
             await ffmpeg.run(
                 '-i', 'audio.' + audioFile.name.split('.').pop(),
                 '-i', 'image.png',
@@ -135,7 +126,6 @@
                 `${audioName}.mp4`
             );
 
-            // 変換結果を取得
             const data = ffmpeg.FS('readFile', `${audioName}.mp4`);
             const videoBlob = new Blob([data.buffer], { type: 'video/mp4' });
             ffmpeg.FS('unlink', `${audioName}.mp4`);
@@ -327,7 +317,6 @@
                 if (batchPlaylist) {
                     document.getElementById(`playlist${index}`).value = batchPlaylist;
                 }
-                // サムネイルは手動でコピー（input 要素の値をプログラムで変更不可）
             });
 
             if (batchThumbnail) {

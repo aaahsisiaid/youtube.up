@@ -2,48 +2,48 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>YouTube 動画アップロード - youtube.up</title>
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        .pre-sign-in { display: block; }
-        .post-sign-in { display: none; }
-        .signed-in .pre-sign-in { display: none; }
-        .signed-in .post-sign-in { display: block; }
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        label, input, select, textarea, button { display: block; margin: 10px 0; }
-        button { padding: 10px 20px; }
-        .warning { color: red; margin: 10px; }
-        textarea { width: 100%; height: 100px; }
+        .upload-progress {
+            transition: width 0.3s ease-in-out;
+        }
+        .error-message {
+            animation: fadeIn 0.3s ease-in;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
     </style>
 </head>
-<body>
-    <h1>YouTube に動画をアップロード - youtube.up</h1>
-    <span id="signinButton" class="pre-sign-in">
-        <button onclick="handleAuthClick()">Google ログイン</button>
-        <p class="warning">注: このアプリはテスト中のため、「このアプリは検証されていません」という警告が表示されます。「詳細を表示」>「続行」をクリックしてください。テストユーザー（例: a6068376@gmail.com）であることを確認してください。</p>
-    </span>
-    <div class="post-sign-in">
-        <label>動画ファイル: <input type="file" id="videoFile" accept="video/*"></label>
-        <label>サムネイル画像: <input type="file" id="thumbnailFile" accept="image/jpeg,image/png"></label>
-        <label>
-            タイトル: <input type="text" id="videoTitle">
-            <input type="checkbox" id="useFileName" onchange="setTitleFromFile()"> ファイル名を使用
-        </label>
-        <label>概要: <textarea id="videoDescription"></textarea></label>
-        <label>公開設定:
-            <select id="privacyStatus">
-                <option value="private">非公開</option>
-                <option value="unlisted">限定公開</option>
-                <option value="public">公開</option>
-            </select>
-        </label>
-        <label>再生リスト:
-            <select id="playlistSelect">
-                <option value="">なし</option>
-            </select>
-            <input type="text" id="newPlaylistTitle" placeholder="新しい再生リストのタイトル">
-            <button onclick="createPlaylist()">新しい再生リストを作成</button>
-        </label>
-        <button onclick="uploadVideo()">アップロード</button>
+<body class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 min-h-screen flex flex-col items-center p-4">
+    <div class="w-full max-w-2xl bg-white dark:bg-gray-800 shadow-lg rounded-lg p-6">
+        <h1 class="text-2xl font-bold mb-4 text-center">YouTube に動画をアップロード - youtube.up</h1>
+        
+        <!-- ログイン前 -->
+        <div id="preSignIn" class="pre-sign-in">
+            <button onclick="handleAuthClick()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded transition duration-200">Google ログイン</button>
+            <p class="text-red-600 mt-2 text-sm">注: このアプリはテスト中のため、「このアプリは検証されていません」という警告が表示されます。「詳細を表示」>「続行」をクリックしてください。テストユーザー（例: a6068376@gmail.com）であることを確認してください。</p>
+        </div>
+
+        <!-- ログイン後 -->
+        <div id="postSignIn" class="post-sign-in hidden">
+            <div class="mb-4">
+                <label class="block text-sm font-medium mb-1">動画ファイル（複数選択可）:</label>
+                <input type="file" id="videoFiles" accept="video/*" multiple class="w-full border rounded p-2 bg-gray-50 dark:bg-gray-700">
+            </div>
+            <div id="videoList" class="space-y-4 mb-4"></div>
+            <button onclick="startUpload()" id="uploadButton" class="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded transition duration-200" disabled>アップロード開始</button>
+            <div id="progressContainer" class="mt-4 hidden">
+                <p id="progressText" class="text-sm mb-2"></p>
+                <div class="w-full bg-gray-200 dark:bg-gray-600 rounded-full h-2.5">
+                    <div id="progressBar" class="bg-blue-600 h-2.5 rounded-full upload-progress" style="width: 0%"></div>
+                </div>
+            </div>
+            <div id="errorContainer" class="mt-4 text-red-600 text-sm hidden"></div>
+        </div>
     </div>
 
     <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -55,6 +55,9 @@
         const DISCOVERY_DOCS = ['https://www.googleapis.com/discovery/v1/apis/youtube/v3/rest'];
         let accessToken = null;
         let tokenClient = null;
+        let videoQueue = [];
+        let currentUploadIndex = 0;
+        let playlists = [];
 
         function initClient() {
             gapi.load('client', () => {
@@ -67,8 +70,7 @@
                         loadPlaylists();
                     }
                 }).catch(error => {
-                    console.error('YouTube API 初期化エラー:', JSON.stringify(error, null, 2));
-                    alert('YouTube API 初期化に失敗しました: ' + JSON.stringify(error));
+                    showError('YouTube API 初期化に失敗しました: ' + JSON.stringify(error));
                 });
             });
         }
@@ -79,27 +81,17 @@
                 scope: SCOPES,
                 callback: (response) => {
                     if (response.error) {
-                        console.error('認証エラー:', JSON.stringify(response, null, 2));
-                        alert('認証に失敗しました: ' + JSON.stringify(response) + '\nテストユーザー（a6068376@gmail.com）であるか、警告画面で「続行」を選択してください。');
+                        showError('認証に失敗しました: ' + JSON.stringify(response) + '\nテストユーザー（a6068376@gmail.com）であるか、「続行」を選択してください。');
                         return;
                     }
                     accessToken = response.access_token;
-                    document.body.className = 'signed-in';
-                    console.log('認証成功、アクセストークン:', accessToken);
+                    document.body.classList.add('signed-in');
+                    document.getElementById('preSignIn').classList.add('hidden');
+                    document.getElementById('postSignIn').classList.remove('hidden');
                     loadPlaylists();
                 }
             });
             tokenClient.requestAccessToken();
-        }
-
-        function setTitleFromFile() {
-            const videoFile = document.getElementById('videoFile').files[0];
-            const titleInput = document.getElementById('videoTitle');
-            if (document.getElementById('useFileName').checked && videoFile) {
-                titleInput.value = videoFile.name.replace(/\.[^/.]+$/, '');
-            } else {
-                titleInput.value = '';
-            }
         }
 
         function loadPlaylists() {
@@ -108,208 +100,281 @@
                 mine: true,
                 maxResults: 50
             }).then(response => {
-                const playlistSelect = document.getElementById('playlistSelect');
-                playlistSelect.innerHTML = '<option value="">なし</option>';
-                response.result.items.forEach(item => {
-                    const option = document.createElement('option');
-                    option.value = item.id;
-                    option.text = item.snippet.title;
-                    playlistSelect.appendChild(option);
-                });
+                playlists = response.result.items || [];
+                updateVideoInputs();
             }).catch(error => {
-                console.error('再生リスト取得エラー:', JSON.stringify(error, null, 2));
-                alert('再生リストの取得に失敗しました: ' + JSON.stringify(error));
+                showError('再生リストの取得に失敗しました: ' + JSON.stringify(error));
             });
         }
 
-        function createPlaylist() {
-            const newPlaylistTitle = document.getElementById('newPlaylistTitle').value;
-            if (!newPlaylistTitle) {
-                alert('再生リストのタイトルを入力してください');
-                return;
-            }
+        function createPlaylist(title, callback) {
             gapi.client.youtube.playlists.insert({
                 part: 'snippet,status',
                 resource: {
-                    snippet: {
-                        title: newPlaylistTitle,
-                        description: '自動作成された再生リスト'
-                    },
-                    status: {
-                        privacyStatus: 'private'
-                    }
+                    snippet: { title, description: '自動作成された再生リスト' },
+                    status: { privacyStatus: 'private' }
                 }
             }).then(response => {
-                const playlistId = response.result.id;
-                const playlistSelect = document.getElementById('playlistSelect');
-                const option = document.createElement('option');
-                option.value = playlistId;
-                option.text = newPlaylistTitle;
-                playlistSelect.appendChild(option);
-                playlistSelect.value = playlistId;
-                alert('再生リストを作成しました: ' + newPlaylistTitle);
+                playlists.push(response.result);
+                callback(response.result.id);
             }).catch(error => {
-                console.error('再生リスト作成エラー:', JSON.stringify(error, null, 2));
-                alert('再生リストの作成に失敗しました: ' + JSON.stringify(error));
+                showError('再生リストの作成に失敗しました: ' + JSON.stringify(error));
             });
         }
 
         function ensureValidToken(callback) {
             if (!tokenClient) {
-                alert('ログインセッションが無効です。再度ログインしてください。');
-                document.body.className = '';
+                showError('ログインセッションが無効です。再度ログインしてください。');
+                document.body.classList.remove('signed-in');
+                document.getElementById('preSignIn').classList.remove('hidden');
+                document.getElementById('postSignIn').classList.add('hidden');
                 return;
             }
             tokenClient.requestAccessToken({
                 prompt: '',
                 callback: (response) => {
                     if (response.error) {
-                        console.error('トークン更新エラー:', JSON.stringify(response, null, 2));
-                        alert('トークンの更新に失敗しました: ' + JSON.stringify(response));
+                        showError('トークンの更新に失敗しました: ' + JSON.stringify(response));
                         return;
                     }
                     accessToken = response.access_token;
-                    console.log('トークン更新成功:', accessToken);
                     callback();
                 }
             });
         }
 
-        function uploadVideo() {
-            const videoFile = document.getElementById('videoFile').files[0];
-            const thumbnailFile = document.getElementById('thumbnailFile').files[0];
-            const title = document.getElementById('videoTitle').value || 'テスト動画';
-            const description = document.getElementById('videoDescription').value || 'HTMLとJSでアップロードした動画';
-            const privacyStatus = document.getElementById('privacyStatus').value;
-            const playlistId = document.getElementById('playlistSelect').value;
+        function showError(message) {
+            const errorContainer = document.getElementById('errorContainer');
+            errorContainer.classList.remove('hidden');
+            errorContainer.innerHTML += `<p class="error-message">${message}</p>`;
+            console.error(message);
+        }
 
-            if (!videoFile) {
-                alert('動画ファイルを選択してください');
+        function clearErrors() {
+            const errorContainer = document.getElementById('errorContainer');
+            errorContainer.classList.add('hidden');
+            errorContainer.innerHTML = '';
+        }
+
+        function updateVideoInputs() {
+            const videoFiles = document.getElementById('videoFiles').files;
+            const videoList = document.getElementById('videoList');
+            videoList.innerHTML = '';
+            videoQueue = [];
+
+            if (videoFiles.length === 0) {
+                document.getElementById('uploadButton').disabled = true;
                 return;
             }
-            if (!accessToken) {
-                alert('先に Google ログインしてください');
+
+            Array.from(videoFiles).forEach((file, index) => {
+                const div = document.createElement('div');
+                div.className = 'bg-gray-50 dark:bg-gray-700 p-4 rounded-lg shadow';
+                div.innerHTML = `
+                    <h3 class="text-lg font-semibold mb-2">${file.name}</h3>
+                    <div class="grid grid-cols-1 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium">タイトル:</label>
+                            <input type="text" id="title${index}" value="${file.name.replace(/\.[^/.]+$/, '')}" class="w-full border rounded p-2 bg-white dark:bg-gray-600">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium">概要:</label>
+                            <textarea id="description${index}" class="w-full border rounded p-2 bg-white dark:bg-gray-600" rows="3"></textarea>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium">公開設定:</label>
+                            <select id="privacy${index}" class="w-full border rounded p-2 bg-white dark:bg-gray-600">
+                                <option value="private">非公開</option>
+                                <option value="unlisted">限定公開</option>
+                                <option value="public">公開</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium">サムネイル:</label>
+                            <input type="file" id="thumbnail${index}" accept="image/jpeg,image/png" class="w-full border rounded p-2 bg-white dark:bg-gray-600">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium">再生リスト:</label>
+                            <select id="playlist${index}" class="w-full border rounded p-2 bg-white dark:bg-gray-600">
+                                <option value="">なし</option>
+                                ${playlists.map(p => `<option value="${p.id}">${p.snippet.title}</option>`).join('')}
+                            </select>
+                            <input type="text" id="newPlaylist${index}" placeholder="新しい再生リストのタイトル" class="w-full border rounded p-2 mt-2 bg-white dark:bg-gray-600">
+                            <button onclick="createNewPlaylist(${index})" class="mt-2 bg-blue-600 hover:bg-blue-700 text-white py-1 px-3 rounded">新規作成</button>
+                        </div>
+                    </div>
+                `;
+                videoList.appendChild(div);
+                videoQueue.push({ file, index });
+            });
+
+            document.getElementById('uploadButton').disabled = false;
+        }
+
+        function createNewPlaylist(index) {
+            const title = document.getElementById(`newPlaylist${index}`).value;
+            if (!title) {
+                showError('再生リストのタイトルを入力してください');
                 return;
             }
-            if (videoFile.size > 128 * 1024 * 1024) {
-                alert('動画ファイルが大きすぎます（最大 128MB）');
+            createPlaylist(title, (playlistId) => {
+                const select = document.getElementById(`playlist${index}`);
+                const option = document.createElement('option');
+                option.value = playlistId;
+                option.text = title;
+                select.appendChild(option);
+                select.value = playlistId;
+            });
+        }
+
+        function startUpload() {
+            if (videoQueue.length === 0) {
+                showError('動画ファイルが選択されていません');
+                return;
+            }
+            clearErrors();
+            currentUploadIndex = 0;
+            document.getElementById('progressContainer').classList.remove('hidden');
+            document.getElementById('uploadButton').disabled = true;
+            uploadNextVideo();
+        }
+
+        function uploadNextVideo() {
+            if (currentUploadIndex >= videoQueue.length) {
+                document.getElementById('progressText').textContent = 'すべての動画のアップロードが完了しました！';
+                document.getElementById('progressBar').style.width = '100%';
+                document.getElementById('uploadButton').disabled = false;
+                return;
+            }
+
+            const { file, index } = videoQueue[currentUploadIndex];
+            const title = document.getElementById(`title${index}`).value || 'テスト動画';
+            const description = document.getElementById(`description${index}`).value || 'HTMLとJSでアップロード';
+            const privacyStatus = document.getElementById(`privacy${index}`).value;
+            const thumbnailFile = document.getElementById(`thumbnail${index}`).files[0];
+            const playlistId = document.getElementById(`playlist${index}`).value;
+
+            document.getElementById('progressText').textContent = `アップロード中: ${file.name} (${currentUploadIndex + 1}/${videoQueue.length})`;
+            document.getElementById('progressBar').style.width = `${(currentUploadIndex / videoQueue.length) * 100}%`;
+
+            if (file.size > 128 * 1024 * 1024) {
+                showError(`動画ファイルが大きすぎます: ${file.name}（最大 128MB）`);
+                currentUploadIndex++;
+                uploadNextVideo();
                 return;
             }
 
             const metadata = {
-                snippet: {
-                    title: title,
-                    description: description,
-                    categoryId: '22' // People & Blogs
-                },
-                status: {
-                    privacyStatus: privacyStatus
-                }
+                snippet: { title, description, categoryId: '22' },
+                status: { privacyStatus }
             };
 
             const formData = new FormData();
             formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-            formData.append('media', videoFile);
+            formData.append('media', file);
 
-            const xhr = new XMLHttpRequest();
-            xhr.open('POST', 'https://www.googleapis.com/upload/youtube/v3/videos?part=snippet,status&uploadType=multipart', true);
-            xhr.setRequestHeader('Authorization', 'Bearer ' + accessToken);
+            ensureValidToken(() => {
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', 'https://www.googleapis.com/upload/youtube/v3/videos?part=snippet,status&uploadType=multipart', true);
+                xhr.setRequestHeader('Authorization', 'Bearer ' + accessToken);
 
-            xhr.upload.onprogress = (event) => {
-                if (event.lengthComputable) {
-                    const percent = (event.loaded / event.total) * 100;
-                    console.log(`アップロード進捗: ${percent.toFixed(2)}%`);
-                }
-            };
-
-            xhr.onload = () => {
-                if (xhr.status === 200) {
-                    const response = JSON.parse(xhr.responseText);
-                    const videoId = response.id;
-                    alert('動画アップロード成功！ビデオ ID: ' + videoId);
-
-                    if (thumbnailFile) {
-                        ensureValidToken(() => uploadThumbnail(videoId, thumbnailFile));
+                xhr.upload.onprogress = (event) => {
+                    if (event.lengthComputable) {
+                        const percent = (event.loaded / event.total) * 100;
+                        console.log(`アップロード進捗 (${file.name}): ${percent.toFixed(2)}%`);
                     }
+                };
 
-                    if (playlistId) {
-                        ensureValidToken(() => addToPlaylist(videoId, playlistId));
-                    }
-                } else {
-                    let errorMsg = xhr.responseText || '不明なエラー';
-                    try {
-                        const errorJson = JSON.parse(errorMsg);
-                        if (errorJson.error && errorJson.error.reason === 'uploadLimitExceeded') {
-                            errorMsg = 'YouTube の動画アップロード制限に達しました。電話番号を検証するか、別のアカウントを試してください。';
+                xhr.onload = () => {
+                    if (xhr.status === 200) {
+                        const response = JSON.parse(xhr.responseText);
+                        const videoId = response.id;
+                        console.log(`動画アップロード成功: ${file.name}, ビデオ ID: ${videoId}`);
+
+                        if (thumbnailFile) {
+                            uploadThumbnail(videoId, thumbnailFile);
                         }
-                    } catch (e) {
-                        // JSON パース失敗時は生のエラーメッセージを使用
+
+                        if (playlistId) {
+                            addToPlaylist(videoId, playlistId);
+                        }
+
+                        currentUploadIndex++;
+                        document.getElementById('progressBar').style.width = `${((currentUploadIndex) / videoQueue.length) * 100}%`;
+                        uploadNextVideo();
+                    } else {
+                        let errorMsg = xhr.responseText || '不明なエラー';
+                        try {
+                            const errorJson = JSON.parse(errorMsg);
+                            if (errorJson.error && errorJson.error.reason === 'uploadLimitExceeded') {
+                                errorMsg = `YouTube の動画アップロード制限に達しました: ${file.name}。電話番号を検証するか、別のアカウントを試してください。`;
+                            }
+                        } catch (e) {}
+                        showError(`動画アップロード失敗 (${file.name}): ${xhr.status} ${xhr.statusText}\n詳細: ${errorMsg}`);
+                        currentUploadIndex++;
+                        uploadNextVideo();
                     }
-                    alert(`動画アップロード失敗: ${xhr.status} ${xhr.statusText}\n詳細: ${errorMsg}`);
-                    console.error(`動画アップロードエラー: ${xhr.status}`, errorMsg);
-                }
-            };
+                };
 
-            xhr.onerror = () => {
-                alert('動画アップロードネットワークエラー');
-                console.error('動画アップロードネットワークエラー:', xhr.statusText);
-            };
+                xhr.onerror = () => {
+                    showError(`動画アップロードネットワークエラー: ${file.name}`);
+                    currentUploadIndex++;
+                    uploadNextVideo();
+                };
 
-            xhr.send(formData);
+                xhr.send(formData);
+            });
         }
 
         function uploadThumbnail(videoId, thumbnailFile) {
             if (thumbnailFile.size > 2 * 1024 * 1024) {
-                alert('サムネイルファイルが大きすぎます（最大 2MB）');
+                showError(`サムネイルが大きすぎます: ${thumbnailFile.name}（最大 2MB）`);
                 return;
             }
 
             const formData = new FormData();
             formData.append('file', thumbnailFile);
 
-            const xhr = new XMLHttpRequest();
-            xhr.open('POST', `https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=${videoId}&uploadType=media`, true);
-            xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`);
+            ensureValidToken(() => {
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', `https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=${videoId}&uploadType=media`, true);
+                xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`);
 
-            xhr.onload = () => {
-                if (xhr.status === 200) {
-                    alert('サムネイルアップロード成功！');
-                    console.log('サムネイルアップロード応答:', xhr.responseText);
-                } else {
-                    const errorMsg = xhr.responseText || '不明なエラー';
-                    alert(`サムネイルアップロード失敗: ${xhr.status} ${xhr.statusText}\n詳細: ${errorMsg}`);
-                    console.error(`サムネイルアップロードエラー: ${xhr.status}`, errorMsg);
-                }
-            };
-
-            xhr.onerror = () => {
-                alert('サムネイルアップロードネットワークエラー');
-                console.error('サムネイルアップロードエラー:', xhr.statusText);
-            };
-
-            xhr.send(formData);
-        }
-
-        function addToPlaylist(videoId, playlistId) {
-            gapi.client.youtube.playlistItems.insert({
-                part: 'snippet',
-                resource: {
-                    snippet: {
-                        playlistId: playlistId,
-                        resourceId: {
-                            kind: 'youtube#video',
-                            videoId: videoId
-                        }
+                xhr.onload = () => {
+                    if (xhr.status === 200) {
+                        console.log(`サムネイルアップロード成功: ${videoId}`);
+                    } else {
+                        showError(`サムネイルアップロード失敗 (${videoId}): ${xhr.status} ${xhr.statusText}`);
                     }
-                }
-            }).then(() => {
-                alert('再生リストに追加しました！');
-            }).catch(error => {
-                console.error('再生リスト追加エラー:', JSON.stringify(error, null, 2));
-                alert('再生リストへの追加に失敗しました: ' + JSON.stringify(error));
+                };
+
+                xhr.onerror = () => {
+                    showError(`サムネイルネットワークエラー: ${videoId}`);
+                };
+
+                xhr.send(formData);
             });
         }
 
+        function addToPlaylist(videoId, playlistId) {
+            ensureValidToken(() => {
+                gapi.client.youtube.playlistItems.insert({
+                    part: 'snippet',
+                    resource: {
+                        snippet: {
+                            playlistId: playlistId,
+                            resourceId: { kind: 'youtube#video', videoId }
+                        }
+                    }
+                }).then(() => {
+                    console.log(`再生リストに追加: ${videoId}`);
+                }).catch(error => {
+                    showError('再生リストへの追加に失敗しました: ' + JSON.stringify(error));
+                });
+            });
+        }
+
+        document.getElementById('videoFiles').addEventListener('change', updateVideoInputs);
         initClient();
     </script>
 </body>

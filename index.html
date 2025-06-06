@@ -9,32 +9,53 @@
         .signed-in .pre-sign-in { display: none; }
         .signed-in .post-sign-in { display: block; }
         body { font-family: Arial, sans-serif; margin: 20px; }
-        button { padding: 10px 20px; margin: 10px; }
-        input { margin: 10px; }
+        label, input, select, textarea, button { display: block; margin: 10px 0; }
+        button { padding: 10px 20px; }
+        .warning { color: red; margin: 10px; }
+        textarea { width: 100%; height: 100px; }
     </style>
 </head>
 <body>
     <h1>YouTube に動画をアップロード</h1>
     <span id="signinButton" class="pre-sign-in">
         <button onclick="handleAuthClick()">Google ログイン</button>
+        <p class="warning">注: このアプリはテスト中のため、「このアプリは検証されていません」という警告が表示されます。「詳細を表示」>「続行」をクリックしてください。テストユーザー（例: a6068376@gmail.com）であることを確認してください。</p>
     </span>
     <div class="post-sign-in">
-        <input type="file" id="videoFile" accept="video/*">
+        <label>動画ファイル: <input type="file" id="videoFile" accept="video/*"></label>
+        <label>サムネイル画像: <input type="file" id="thumbnailFile" accept="image/jpeg,image/png"></label>
+        <label>
+            タイトル: <input type="text" id="videoTitle">
+            <input type="checkbox" id="useFileName" onchange="setTitleFromFile()"> ファイル名を使用
+        </label>
+        <label>概要: <textarea id="videoDescription"></textarea></label>
+        <label>公開設定:
+            <select id="privacyStatus">
+                <option value="private">非公開</option>
+                <option value="unlisted">限定公開</option>
+                <option value="public">公開</option>
+            </select>
+        </label>
+        <label>再生リスト:
+            <select id="playlistSelect">
+                <option value="">なし</option>
+            </select>
+            <input type="text" id="newPlaylistTitle" placeholder="新しい再生リストのタイトル">
+            <button onclick="createPlaylist()">新しい再生リストを作成</button>
+        </label>
         <button onclick="uploadVideo()">アップロード</button>
     </div>
 
-    <!-- Google Identity Services ライブラリ -->
     <script src="https://accounts.google.com/gsi/client" async defer></script>
-    <!-- YouTube API クライアントライブラリ -->
     <script src="https://apis.google.com/js/api.js"></script>
     <script>
         const CLIENT_ID = '320694642206-n0gk8vc7v6a3e2calbcp7r3jl50bic5p.apps.googleusercontent.com';
         const API_KEY = 'AIzaSyCtUAPx02UxgEQtJzYcbRA1rJd5vi5AjaM';
-        const SCOPE = 'https://www.googleapis.com/auth/youtube.upload';
+        const SCOPES = 'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube';
         const DISCOVERY_DOCS = ['https://www.googleapis.com/discovery/v1/apis/youtube/v3/rest'];
         let accessToken = null;
 
-        // GIS 認証の初期化
+        // YouTube API クライアント初期化
         function initClient() {
             gapi.load('client', () => {
                 gapi.client.init({
@@ -42,6 +63,9 @@
                     discoveryDocs: DISCOVERY_DOCS
                 }).then(() => {
                     console.log('YouTube API クライアント初期化完了');
+                    if (accessToken) {
+                        loadPlaylists();
+                    }
                 }).catch(error => {
                     console.error('YouTube API 初期化エラー:', JSON.stringify(error, null, 2));
                     alert('YouTube API 初期化に失敗しました: ' + JSON.stringify(error));
@@ -53,26 +77,97 @@
         function handleAuthClick() {
             const client = google.accounts.oauth2.initTokenClient({
                 client_id: CLIENT_ID,
-                scope: SCOPE,
+                scope: SCOPES,
                 callback: (response) => {
                     if (response.error) {
                         console.error('認証エラー:', JSON.stringify(response, null, 2));
-                        alert('認証に失敗しました: ' + JSON.stringify(response));
+                        alert('認証に失敗しました: ' + JSON.stringify(response) + '\nテストユーザー（a6068376@gmail.com）であるか、警告画面で「続行」を選択してください。');
                         return;
                     }
                     accessToken = response.access_token;
                     document.body.className = 'signed-in';
                     console.log('認証成功、アクセストークン:', accessToken);
+                    loadPlaylists();
                 }
             });
             client.requestAccessToken();
         }
 
+        // ファイル名からタイトルを設定
+        function setTitleFromFile() {
+            const videoFile = document.getElementById('videoFile').files[0];
+            const titleInput = document.getElementById('videoTitle');
+            if (document.getElementById('useFileName').checked && videoFile) {
+                titleInput.value = videoFile.name.replace(/\.[^/.]+$/, ''); // 拡張子を除去
+            } else {
+                titleInput.value = '';
+            }
+        }
+
+        // 再生リストを取得
+        function loadPlaylists() {
+            gapi.client.youtube.playlists.list({
+                part: 'snippet',
+                mine: true,
+                maxResults: 50
+            }).then(response => {
+                const playlistSelect = document.getElementById('playlistSelect');
+                playlistSelect.innerHTML = '<option value="">なし</option>';
+                response.result.items.forEach(item => {
+                    const option = document.createElement('option');
+                    option.value = item.id;
+                    option.text = item.snippet.title;
+                    playlistSelect.appendChild(option);
+                });
+            }).catch(error => {
+                console.error('再生リスト取得エラー:', JSON.stringify(error, null, 2));
+                alert('再生リストの取得に失敗しました: ' + JSON.stringify(error));
+            });
+        }
+
+        // 新しい再生リストを作成
+        function createPlaylist() {
+            const newPlaylistTitle = document.getElementById('newPlaylistTitle').value;
+            if (!newPlaylistTitle) {
+                alert('再生リストのタイトルを入力してください');
+                return;
+            }
+            gapi.client.youtube.playlists.insert({
+                part: 'snippet,status',
+                resource: {
+                    snippet: {
+                        title: newPlaylistTitle,
+                        description: '自動作成された再生リスト'
+                    },
+                    status: {
+                        privacyStatus: 'private'
+                    }
+                }
+            }).then(response => {
+                const playlistId = response.result.id;
+                const playlistSelect = document.getElementById('playlistSelect');
+                const option = document.createElement('option');
+                option.value = playlistId;
+                option.text = newPlaylistTitle;
+                playlistSelect.appendChild(option);
+                playlistSelect.value = playlistId;
+                alert('再生リストを作成しました: ' + newPlaylistTitle);
+            }).catch(error => {
+                console.error('再生リスト作成エラー:', JSON.stringify(error, null, 2));
+                alert('再生リストの作成に失敗しました: ' + JSON.stringify(error));
+            });
+        }
+
         // 動画アップロード
         function uploadVideo() {
-            const fileInput = document.getElementById('videoFile');
-            const file = fileInput.files[0];
-            if (!file) {
+            const videoFile = document.getElementById('videoFile').files[0];
+            const thumbnailFile = document.getElementById('thumbnailFile').files[0];
+            const title = document.getElementById('videoTitle').value || 'テスト動画';
+            const description = document.getElementById('videoDescription').value || 'HTMLとJSでアップロードした動画';
+            const privacyStatus = document.getElementById('privacyStatus').value;
+            const playlistId = document.getElementById('playlistSelect').value;
+
+            if (!videoFile) {
                 alert('動画ファイルを選択してください');
                 return;
             }
@@ -83,15 +178,16 @@
 
             const metadata = {
                 snippet: {
-                    title: 'テスト動画',
-                    description: 'HTMLとJSでアップロードした動画',
+                    title: title,
+                    description: description,
                     categoryId: '22' // People & Blogs
                 },
                 status: {
-                    privacyStatus: 'private'
+                    privacyStatus: privacyStatus
                 }
             };
 
+            // 動画アップロード
             const xhr = new XMLHttpRequest();
             xhr.open('POST', 'https://www.googleapis.com/upload/youtube/v3/videos?part=snippet,status', true);
             xhr.setRequestHeader('Authorization', 'Bearer ' + accessToken);
@@ -101,7 +197,7 @@
             body += 'Content-Type: application/json; charset=UTF-8\r\n\r\n';
             body += JSON.stringify(metadata) + '\r\n';
             body += '--foo_bar_baz\r\n';
-            body += 'Content-Type: ' + file.type + '\r\n';
+            body += 'Content-Type: ' + videoFile.type + '\r\n';
             body += 'Content-Transfer-Encoding: binary\r\n\r\n';
 
             const reader = new FileReader();
@@ -110,14 +206,25 @@
                 body += '--foo_bar_baz--';
                 xhr.send(body);
             };
-            reader.readAsBinaryString(file);
+            reader.readAsBinaryString(videoFile);
 
             xhr.onload = () => {
                 if (xhr.status === 200) {
-                    alert('アップロード成功！');
-                    console.log(JSON.parse(xhr.responseText));
+                    const response = JSON.parse(xhr.responseText);
+                    const videoId = response.id;
+                    alert('動画アップロード成功！ビデオ ID: ' + videoId);
+
+                    // サムネイルアップロード
+                    if (thumbnailFile) {
+                        uploadThumbnail(videoId, thumbnailFile);
+                    }
+
+                    // 再生リストに追加
+                    if (playlistId) {
+                        addToPlaylist(videoId, playlistId);
+                    }
                 } else {
-                    alert('アップロード失敗: ' + xhr.statusText);
+                    alert('動画アップロード失敗: ' + xhr.statusText);
                     console.error(xhr.responseText);
                 }
             };
@@ -127,7 +234,54 @@
             };
         }
 
-        // 初期化
+        // サムネイルアップロード
+        function uploadThumbnail(videoId, thumbnailFile) {
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', `https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=${videoId}`, true);
+            xhr.setRequestHeader('Authorization', 'Bearer ' + accessToken);
+            xhr.setRequestHeader('Content-Type', thumbnailFile.type);
+
+            const reader = new FileReader();
+            reader.onload = () => {
+                xhr.send(reader.result);
+            };
+            reader.readAsArrayBuffer(thumbnailFile);
+
+            xhr.onload = () => {
+                if (xhr.status === 200) {
+                    alert('サムネイルアップロード成功！');
+                } else {
+                    alert('サムネイルアップロード失敗: ' + xhr.statusText);
+                    console.error(xhr.responseText);
+                }
+            };
+            xhr.onerror = () => {
+                alert('サムネイルネットワークエラー');
+                console.error('ネットワークエラー');
+            };
+        }
+
+        // 再生リストに追加
+        function addToPlaylist(videoId, playlistId) {
+            gapi.client.youtube.playlistItems.insert({
+                part: 'snippet',
+                resource: {
+                    snippet: {
+                        playlistId: playlistId,
+                        resourceId: {
+                            kind: 'youtube#video',
+                            videoId: videoId
+                        }
+                    }
+                }
+            }).then(() => {
+                alert('再生リストに追加しました！');
+            }).catch(error => {
+                console.error('再生リスト追加エラー:', JSON.stringify(error, null, 2));
+                alert('再生リストへの追加に失敗しました: ' + JSON.stringify(error));
+            });
+        }
+
         initClient();
     </script>
 </body>

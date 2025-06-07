@@ -4,10 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>youtube.up - YouTube動画アップロードツール</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
     <script src="https://apis.google.com/js/api.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/ffmpeg/7.0.0-rc7/ffmpeg.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ffmpeg/0.11.6/ffmpeg.min.js"></script>
     <style>
         .loading-spinner {
             border: 4px solid #f3f4f6;
@@ -166,500 +165,478 @@
     </div>
 
     <script>
-        // グローバル変数
-        let isGapiLoaded = false;
-        let isFFmpegLoaded = false;
-        let ffmpeg = null;
-        let selectedFiles = [];
-        let currentPlaylistId = null;
-        let userPlaylists = [];
+        try {
+            // グローバル変数
+            let isGapiLoaded = false;
+            let isFFmpegLoaded = false;
+            let ffmpeg = null;
+            let selectedFiles = [];
+            let currentPlaylistId = null;
+            let userPlaylists = [];
 
-        // Google API設定
-        const CLIENT_ID = '320694443306-u0g4k8vc7v6a3e2calbcq7r7jl40bqc4p.apps.googleusercontent.com';
-        const API_KEY = 'AIzaSyBuV5V7kB3lI8EQtuQ7qB3q8J7QBkQjaM';
-        const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/youtube/v3/rest';
-        const SCOPES = 'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube';
+            // Google API設定
+            const CLIENT_ID = '320694443306-u0g4k8vc7v6a3e2calbcq7r7jl40bqc4p.apps.googleusercontent.com';
+            const API_KEY = 'AIzaSyBuV5V7kB3lI8EQtuQ7qB3q8J7QBkQjaM';
+            const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/youtube/v3/rest';
+            const SCOPES = 'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube';
 
-        // ユーティリティ関数
-        function showError(message) {
-            const errorSection = document.getElementById('error-section');
-            const errorMessage = document.getElementById('error-message');
-            errorMessage.textContent = message;
-            errorSection.style.display = 'block';
-            console.error('エラー:', message);
-        }
+            // ユーティリティ関数
+            function showError(message) {
+                const errorSection = document.getElementById('error-section');
+                const errorMessage = document.getElementById('error-message');
+                errorMessage.textContent = message;
+                errorSection.style.display = 'block';
+                console.error('エラー:', message);
+            }
 
-        function hideError() {
-            document.getElementById('error-section').style.display = 'none';
-        }
+            function hideError() {
+                document.getElementById('error-section').style.display = 'none';
+            }
 
-        function formatFileSize(bytes) {
-            if (bytes === 0) return '0 Bytes';
-            const k = 1024;
-            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-        }
+            function formatFileSize(bytes) {
+                if (bytes === 0) return '0 Bytes';
+                const k = 1024;
+                const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+            }
 
-        function getFileNameWithoutExtension(filename) {
-            return filename.replace(/\.[^/.]+$/, '');
-        }
+            function getFileNameWithoutExtension(filename) {
+                return filename.replace(/\.[^/.]+$/, '');
+            }
 
-        // FFmpeg初期化（リトライ機能付き）
-        async function initFFmpeg(retryCount = 0) {
-            const maxRetries = 3;
-            try {
-                console.log(`FFmpeg初期化試行 ${retryCount + 1}/${maxRetries + 1}`);
-                
-                if (typeof FFmpeg === 'undefined') {
-                    throw new Error('FFmpeg.jsライブラリが読み込まれていません');
-                }
+            // FFmpeg初期化（リトライ機能付き）
+            async function initFFmpeg(retryCount = 0) {
+                const maxRetries = 3;
+                try {
+                    console.log(`FFmpeg初期化試行 ${retryCount + 1}/${maxRetries + 1}`);
+                    
+                    if (typeof FFmpeg === 'undefined') {
+                        console.log('FFmpeg.jsが利用できません - 音声変換は無効');
+                        return false;
+                    }
 
-                ffmpeg = new FFmpeg.FFmpeg();
-                
-                ffmpeg.on('log', ({ message }) => {
-                    console.log('FFmpeg:', message);
-                });
-
-                ffmpeg.on('progress', ({ progress }) => {
-                    console.log('FFmpeg進捗:', Math.round(progress * 100) + '%');
-                });
-
-                await ffmpeg.load();
-                isFFmpegLoaded = true;
-                console.log('FFmpeg初期化完了');
-                return true;
-            } catch (error) {
-                console.error(`FFmpeg初期化エラー (試行 ${retryCount + 1}):`, error);
-                
-                if (retryCount < maxRetries) {
-                    console.log(`${1000 * (retryCount + 1)}ms後に再試行...`);
-                    await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)));
-                    return initFFmpeg(retryCount + 1);
-                } else {
-                    throw new Error(`FFmpeg初期化に失敗しました: ${error.message}`);
+                    ffmpeg = new FFmpeg.createFFmpeg({
+                        log: true,
+                        corePath: 'https://cdnjs.cloudflare.com/ajax/libs/ffmpeg/0.11.6/ffmpeg-core.js'
+                    });
+                    
+                    await ffmpeg.load();
+                    isFFmpegLoaded = true;
+                    console.log('FFmpeg初期化完了');
+                    return true;
+                } catch (error) {
+                    console.error(`FFmpeg初期化エラー (試行 ${retryCount + 1}):`, error);
+                    
+                    if (retryCount < maxRetries) {
+                        console.log(`${1000 * (retryCount + 1)}ms後に再試行...`);
+                        await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)));
+                        return initFFmpeg(retryCount + 1);
+                    } else {
+                        console.log('FFmpeg初期化に失敗 - 音声変換は無効');
+                        return false;
+                    }
                 }
             }
-        }
 
-        // Google API初期化（非同期対応）
-        async function initGapiClient() {
-            try {
-                return new Promise((resolve, reject) => {
-                    if (typeof gapi === 'undefined') {
-                        reject(new Error('Google APIライブラリが読み込まれていません'));
+            // Google API初期化（非同期対応）
+            async function initGapiClient() {
+                try {
+                    return new Promise((resolve, reject) => {
+                        if (typeof gapi === 'undefined') {
+                            reject(new Error('Google APIライブラリが読み込まれていません'));
+                            return;
+                        }
+
+                        gapi.load('client:auth2', async () => {
+                            try {
+                                await gapi.client.init({
+                                    apiKey: API_KEY,
+                                    clientId: CLIENT_ID,
+                                    discoveryDocs: [DISCOVERY_DOC],
+                                    scope: SCOPES
+                                });
+
+                                const authInstance = gapi.auth2.getAuthInstance();
+                                if (authInstance.isSignedIn.get()) {
+                                    handleAuthSuccess();
+                                } else {
+                                    showLoginButton();
+                                }
+
+                                isGapiLoaded = true;
+                                console.log('Google API初期化完了');
+                                resolve();
+                            } catch (error) {
+                                console.error('Google API初期化エラー:', error);
+                                reject(error);
+                            }
+                        });
+                    });
+                } catch (error) {
+                    throw new Error(`Google API初期化に失敗しました: ${error.message}`);
+                }
+            }
+
+            // 認証ボタンクリックハンドラーをグローバルに定義
+            window.handleAuthClick = async function() {
+                try {
+                    console.log('認証ボタンクリック - handleAuthClick実行開始');
+                    hideError();
+                    
+                    if (!isGapiLoaded) {
+                        throw new Error('Google APIが初期化されていません');
+                    }
+
+                    const authInstance = gapi.auth2.getAuthInstance();
+                    const authResult = await authInstance.signIn();
+                    
+                    console.log('Google認証成功:', authResult);
+                    handleAuthSuccess();
+                } catch (error) {
+                    console.error('認証エラー:', error);
+                    showError(`認証に失敗しました: ${error.message}`);
+                }
+            };
+
+            console.log('handleAuthClick 定義完了');
+
+            function showLoginButton() {
+                document.getElementById('auth-loading').style.display = 'none';
+                document.getElementById('auth-login').style.display = 'block';
+                document.getElementById('auth-success').style.display = 'none';
+            }
+
+            async function handleAuthSuccess() {
+                try {
+                    const authInstance = gapi.auth2.getAuthInstance();
+                    const user = authInstance.currentUser.get();
+                    const profile = user.getBasicProfile();
+
+                    document.getElementById('user-info').textContent = 
+                        `ログイン中: ${profile.getName()} (${profile.getEmail()})`;
+                    
+                    document.getElementById('auth-loading').style.display = 'none';
+                    document.getElementById('auth-login').style.display = 'none';
+                    document.getElementById('auth-success').style.display = 'block';
+                    document.getElementById('upload-section').style.display = 'block';
+
+                    await loadUserPlaylists();
+                    console.log('認証処理完了');
+                } catch (error) {
+                    console.error('認証後処理エラー:', error);
+                    showError(`認証後の処理に失敗しました: ${error.message}`);
+                }
+            }
+
+            async function handleLogout() {
+                try {
+                    const authInstance = gapi.auth2.getAuthInstance();
+                    await authInstance.signOut();
+                    
+                    document.getElementById('auth-success').style.display = 'none';
+                    document.getElementById('upload-section').style.display = 'none';
+                    showLoginButton();
+                    
+                    selectedFiles = [];
+                    updateFileList();
+                } catch (error) {
+                    console.error('ログアウトエラー:', error);
+                    showError(`ログアウトに失敗しました: ${error.message}`);
+                }
+            }
+
+            // ユーザーの再生リスト読み込み
+            async function loadUserPlaylists() {
+                try {
+                    const response = await gapi.client.youtube.playlists.list({
+                        part: 'snippet',
+                        mine: true,
+                        maxResults: 50
+                    });
+
+                    userPlaylists = response.result.items || [];
+                    
+                    const select = document.getElementById('existing-playlist-select');
+                    select.innerHTML = '<option value="">選択してください</option>';
+                    
+                    userPlaylists.forEach(playlist => {
+                        const option = document.createElement('option');
+                        option.value = playlist.id;
+                        option.textContent = playlist.snippet.title;
+                        select.appendChild(option);
+                    });
+
+                    if (userPlaylists.length > 0) {
+                        document.getElementById('existing-playlists').style.display = 'block';
+                    }
+                } catch (error) {
+                    console.error('再生リスト読み込みエラー:', error);
+                }
+            }
+
+            // 再生リスト作成
+            async function createPlaylist() {
+                try {
+                    const playlistName = document.getElementById('playlist-name').value.trim();
+                    if (!playlistName) {
+                        showError('再生リスト名を入力してください');
                         return;
                     }
 
-                    gapi.load('client:auth2', async () => {
-                        try {
-                            await gapi.client.init({
-                                apiKey: API_KEY,
-                                clientId: CLIENT_ID,
-                                discoveryDocs: [DISCOVERY_DOC],
-                                scope: SCOPES
-                            });
-
-                            const authInstance = gapi.auth2.getAuthInstance();
-                            if (authInstance.isSignedIn.get()) {
-                                handleAuthSuccess();
-                            } else {
-                                showLoginButton();
+                    const response = await gapi.client.youtube.playlists.insert({
+                        part: 'snippet,status',
+                        resource: {
+                            snippet: {
+                                title: playlistName,
+                                description: 'youtube.upで作成された再生リスト'
+                            },
+                            status: {
+                                privacyStatus: 'private'
                             }
-
-                            isGapiLoaded = true;
-                            console.log('Google API初期化完了');
-                            resolve();
-                        } catch (error) {
-                            console.error('Google API初期化エラー:', error);
-                            reject(error);
                         }
                     });
-                });
-            } catch (error) {
-                throw new Error(`Google API初期化に失敗しました: ${error.message}`);
-            }
-        }
 
-        // 認証ボタンクリックハンドラーをグローバルに定義
-        window.handleAuthClick = async function() {
-            try {
-                console.log('認証ボタンクリック - handleAuthClick実行開始');
-                hideError();
-                
-                if (!isGapiLoaded) {
-                    throw new Error('Google APIが初期化されていません');
+                    currentPlaylistId = response.result.id;
+                    console.log('再生リスト作成成功:', response.result);
+                    
+                    // UI更新
+                    document.getElementById('playlist-name').value = '';
+                    await loadUserPlaylists();
+                    
+                    // 作成した再生リストを選択状態にする
+                    document.getElementById('existing-playlist-select').value = currentPlaylistId;
+                    
+                    return currentPlaylistId;
+                } catch (error) {
+                    console.error('再生リスト作成エラー:', error);
+                    showError(`再生リスト作成に失敗しました: ${error.message}`);
+                    return null;
                 }
-
-                const authInstance = gapi.auth2.getAuthInstance();
-                const authResult = await authInstance.signIn();
-                
-                console.log('Google認証成功:', authResult);
-                handleAuthSuccess();
-            } catch (error) {
-                console.error('認証エラー:', error);
-                showError(`認証に失敗しました: ${error.message}`);
             }
-        };
 
-        function showLoginButton() {
-            document.getElementById('auth-loading').style.display = 'none';
-            document.getElementById('auth-login').style.display = 'block';
-            document.getElementById('auth-success').style.display = 'none';
-        }
+            // ファイル関連処理
+            function handleFileSelect(files) {
+                const newFiles = Array.from(files).filter(file => {
+                    // 重複チェック
+                    const isDuplicate = selectedFiles.some(existing => 
+                        existing.name === file.name && existing.size === file.size
+                    );
+                    
+                    if (isDuplicate) {
+                        console.log(`重複ファイルをスキップ: ${file.name}`);
+                        return false;
+                    }
 
-        async function handleAuthSuccess() {
-            try {
-                const authInstance = gapi.auth2.getAuthInstance();
-                const user = authInstance.currentUser.get();
-                const profile = user.getBasicProfile();
+                    // ファイルサイズチェック
+                    const maxSize = file.type.startsWith('video/') ? 128 * 1024 * 1024 : 10 * 1024 * 1024;
+                    if (file.size > maxSize) {
+                        showError(`ファイルサイズが大きすぎます: ${file.name} (${formatFileSize(file.size)})`);
+                        return false;
+                    }
 
-                document.getElementById('user-info').textContent = 
-                    `ログイン中: ${profile.getName()} (${profile.getEmail()})`;
-                
-                document.getElementById('auth-loading').style.display = 'none';
-                document.getElementById('auth-login').style.display = 'none';
-                document.getElementById('auth-success').style.display = 'block';
-                document.getElementById('upload-section').style.display = 'block';
+                    // ファイル形式チェック
+                    const allowedTypes = ['video/mp4', 'audio/mp3', 'audio/wav', 'audio/mpeg'];
+                    if (!allowedTypes.includes(file.type)) {
+                        showError(`サポートされていないファイル形式: ${file.name}`);
+                        return false;
+                    }
 
-                await loadUserPlaylists();
-                console.log('認証処理完了');
-            } catch (error) {
-                console.error('認証後処理エラー:', error);
-                showError(`認証後の処理に失敗しました: ${error.message}`);
-            }
-        }
+                    return true;
+                });
 
-        async function handleLogout() {
-            try {
-                const authInstance = gapi.auth2.getAuthInstance();
-                await authInstance.signOut();
-                
-                document.getElementById('auth-success').style.display = 'none';
-                document.getElementById('upload-section').style.display = 'none';
-                showLoginButton();
-                
-                selectedFiles = [];
+                selectedFiles = selectedFiles.concat(newFiles);
                 updateFileList();
-            } catch (error) {
-                console.error('ログアウトエラー:', error);
-                showError(`ログアウトに失敗しました: ${error.message}`);
+                hideError();
             }
-        }
 
-        // ユーザーの再生リスト読み込み
-        async function loadUserPlaylists() {
-            try {
-                const response = await gapi.client.youtube.playlists.list({
-                    part: 'snippet',
-                    mine: true,
-                    maxResults: 50
-                });
-
-                userPlaylists = response.result.items || [];
+            function updateFileList() {
+                const fileList = document.getElementById('file-list');
+                const selectedFilesDiv = document.getElementById('selected-files');
                 
-                const select = document.getElementById('existing-playlist-select');
-                select.innerHTML = '<option value="">選択してください</option>';
-                
-                userPlaylists.forEach(playlist => {
-                    const option = document.createElement('option');
-                    option.value = playlist.id;
-                    option.textContent = playlist.snippet.title;
-                    select.appendChild(option);
-                });
-
-                if (userPlaylists.length > 0) {
-                    document.getElementById('existing-playlists').style.display = 'block';
-                }
-            } catch (error) {
-                console.error('再生リスト読み込みエラー:', error);
-            }
-        }
-
-        // 再生リスト作成
-        async function createPlaylist() {
-            try {
-                const playlistName = document.getElementById('playlist-name').value.trim();
-                if (!playlistName) {
-                    showError('再生リスト名を入力してください');
+                if (selectedFiles.length === 0) {
+                    selectedFilesDiv.style.display = 'none';
                     return;
                 }
 
-                const response = await gapi.client.youtube.playlists.insert({
-                    part: 'snippet,status',
-                    resource: {
+                selectedFilesDiv.style.display = 'block';
+                fileList.innerHTML = '';
+
+                selectedFiles.forEach((file, index) => {
+                    const fileItem = document.createElement('div');
+                    fileItem.className = 'flex items-center justify-between bg-gray-50 p-3 rounded-md';
+                    
+                    const fileInfo = document.createElement('div');
+                    fileInfo.className = 'flex-1';
+                    
+                    const fileName = document.createElement('div');
+                    fileName.className = 'font-medium';
+                    fileName.textContent = file.name;
+                    
+                    const fileDetails = document.createElement('div');
+                    fileDetails.className = 'text-sm text-gray-500';
+                    fileDetails.textContent = `${formatFileSize(file.size)} - ${file.type}`;
+                    
+                    fileInfo.appendChild(fileName);
+                    fileInfo.appendChild(fileDetails);
+                    
+                    const removeButton = document.createElement('button');
+                    removeButton.className = 'text-red-600 hover:text-red-800 ml-4';
+                    removeButton.innerHTML = '削除';
+                    removeButton.onclick = () => removeFile(index);
+                    
+                    fileItem.appendChild(fileInfo);
+                    fileItem.appendChild(removeButton);
+                    fileList.appendChild(fileItem);
+                });
+            }
+
+            function removeFile(index) {
+                selectedFiles.splice(index, 1);
+                updateFileList();
+            }
+
+            function clearFiles() {
+                selectedFiles = [];
+                updateFileList();
+            }
+
+            // 音声ファイルを動画に変換
+            async function convertAudioToVideo(audioFile) {
+                try {
+                    console.log(`音声変換開始: ${audioFile.name}`);
+                    
+                    if (!isFFmpegLoaded) {
+                        const initialized = await initFFmpeg();
+                        if (!initialized) {
+                            throw new Error('FFmpegの初期化に失敗しました');
+                        }
+                    }
+
+                    // ファイルをFFmpegに読み込み
+                    const audioData = new Uint8Array(await audioFile.arrayBuffer());
+                    ffmpeg.FS('writeFile', 'input.mp3', audioData);
+
+                    // 音声を動画に変換（静止画付き）
+                    await ffmpeg.run(
+                        '-f', 'lavfi',
+                        '-i', 'color=c=black:s=1280x720:d=1',
+                        '-i', 'input.mp3',
+                        '-c:v', 'libx264',
+                        '-c:a', 'aac',
+                        '-shortest',
+                        '-pix_fmt', 'yuv420p',
+                        'output.mp4'
+                    );
+
+                    // 変換結果を取得
+                    const videoData = ffmpeg.FS('readFile', 'output.mp4');
+                    const videoBlob = new Blob([videoData.buffer], { type: 'video/mp4' });
+                    
+                    // 元のファイル名から拡張子を変更
+                    const originalName = getFileNameWithoutExtension(audioFile.name);
+                    const videoFile = new File([videoBlob], `${originalName}.mp4`, { type: 'video/mp4' });
+                    
+                    console.log(`音声変換完了: ${audioFile.name} -> ${videoFile.name}`);
+                    return videoFile;
+                } catch (error) {
+                    console.error('音声変換エラー:', error);
+                    throw new Error(`音声変換に失敗しました: ${error.message}`);
+                }
+            }
+
+            // 動画アップロード進捗表示
+            function createProgressItem(filename, index) {
+                const progressItem = document.createElement('div');
+                progressItem.className = 'border border-gray-200 rounded-lg p-4';
+                progressItem.id = `progress-${index}`;
+                
+                progressItem.innerHTML = `
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="font-medium">${filename}</span>
+                        <span class="text-sm text-gray-500" id="status-${index}">待機中...</span>
+                    </div>
+                    <div class="w-full bg-gray-200 rounded-full h-2">
+                        <div class="bg-blue-600 h-2 rounded-full progress-bar" id="progress-bar-${index}" style="width: 0%"></div>
+                    </div>
+                `;
+                
+                return progressItem;
+            }
+
+            function updateProgress(index, progress, status) {
+                const statusEl = document.getElementById(`status-${index}`);
+                const progressBarEl = document.getElementById(`progress-bar-${index}`);
+                
+                if (statusEl) statusEl.textContent = status;
+                if (progressBarEl) progressBarEl.style.width = `${progress}%`;
+            }
+
+            // 動画アップロード（簡易版）
+            async function uploadVideo(file, index) {
+                try {
+                    updateProgress(index, 10, '処理中...');
+                    
+                    const titleTemplate = document.getElementById('title-template').value || '{filename} #{index}';
+                    const description = document.getElementById('description').value || '';
+                    const privacyStatus = document.getElementById('privacy-status').value || 'private';
+                    
+                    // タイトル生成
+                    const filename = getFileNameWithoutExtension(file.name);
+                    const title = titleTemplate
+                        .replace('{filename}', filename)
+                        .replace('{index}', (index + 1).toString());
+
+                    console.log(`動画アップロード開始: ${title}`);
+                    updateProgress(index, 30, 'アップロード中...');
+
+                    // メタデータ
+                    const metadata = {
                         snippet: {
-                            title: playlistName,
-                            description: 'youtube.upで作成された再生リスト'
+                            title: title,
+                            description: description,
+                            tags: ['youtube.up', 'upload'],
+                            categoryId: '22'
                         },
                         status: {
-                            privacyStatus: 'private'
+                            privacyStatus: privacyStatus
                         }
+                    };
+
+                    // リザンプティブルアップロードの初期化
+                    const initResponse = await fetch('https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${gapi.auth2.getAuthInstance().currentUser.get().getAuthResponse().access_token}`,
+                            'Content-Type': 'application/json',
+                            'X-Upload-Content-Type': 'video/mp4',
+                            'X-Upload-Content-Length': file.size.toString()
+                        },
+                        body: JSON.stringify(metadata)
+                    });
+
+                    if (!initResponse.ok) {
+                        throw new Error(`アップロード初期化失敗: ${initResponse.status} ${initResponse.statusText}`);
                     }
-                });
 
-                currentPlaylistId = response.result.id;
-                console.log('再生リスト作成成功:', response.result);
-                
-                // UI更新
-                document.getElementById('playlist-name').value = '';
-                await loadUserPlaylists();
-                
-                // 作成した再生リストを選択状態にする
-                document.getElementById('existing-playlist-select').value = currentPlaylistId;
-                
-                return currentPlaylistId;
-            } catch (error) {
-                console.error('再生リスト作成エラー:', error);
-                showError(`再生リスト作成に失敗しました: ${error.message}`);
-                return null;
-            }
-        }
-
-        // ファイル関連処理
-        function handleFileSelect(files) {
-            const newFiles = Array.from(files).filter(file => {
-                // 重複チェック
-                const isDuplicate = selectedFiles.some(existing => 
-                    existing.name === file.name && existing.size === file.size
-                );
-                
-                if (isDuplicate) {
-                    console.log(`重複ファイルをスキップ: ${file.name}`);
-                    return false;
-                }
-
-                // ファイルサイズチェック
-                const maxSize = file.type.startsWith('video/') ? 128 * 1024 * 1024 : 10 * 1024 * 1024; // 128MB for video, 10MB for audio
-                if (file.size > maxSize) {
-                    showError(`ファイルサイズが大きすぎます: ${file.name} (${formatFileSize(file.size)})`);
-                    return false;
-                }
-
-                // ファイル形式チェック
-                const allowedTypes = ['video/mp4', 'audio/mp3', 'audio/wav', 'audio/mpeg'];
-                if (!allowedTypes.includes(file.type)) {
-                    showError(`サポートされていないファイル形式: ${file.name}`);
-                    return false;
-                }
-
-                return true;
-            });
-
-            selectedFiles = selectedFiles.concat(newFiles);
-            updateFileList();
-            hideError();
-        }
-
-        function updateFileList() {
-            const fileList = document.getElementById('file-list');
-            const selectedFilesDiv = document.getElementById('selected-files');
-            
-            if (selectedFiles.length === 0) {
-                selectedFilesDiv.style.display = 'none';
-                return;
-            }
-
-            selectedFilesDiv.style.display = 'block';
-            fileList.innerHTML = '';
-
-            selectedFiles.forEach((file, index) => {
-                const fileItem = document.createElement('div');
-                fileItem.className = 'flex items-center justify-between bg-gray-50 p-3 rounded-md';
-                
-                const fileInfo = document.createElement('div');
-                fileInfo.className = 'flex-1';
-                
-                const fileName = document.createElement('div');
-                fileName.className = 'font-medium';
-                fileName.textContent = file.name;
-                
-                const fileDetails = document.createElement('div');
-                fileDetails.className = 'text-sm text-gray-500';
-                fileDetails.textContent = `${formatFileSize(file.size)} - ${file.type}`;
-                
-                fileInfo.appendChild(fileName);
-                fileInfo.appendChild(fileDetails);
-                
-                const removeButton = document.createElement('button');
-                removeButton.className = 'text-red-600 hover:text-red-800 ml-4';
-                removeButton.innerHTML = '削除';
-                removeButton.onclick = () => removeFile(index);
-                
-                fileItem.appendChild(fileInfo);
-                fileItem.appendChild(removeButton);
-                fileList.appendChild(fileItem);
-            });
-        }
-
-        function removeFile(index) {
-            selectedFiles.splice(index, 1);
-            updateFileList();
-        }
-
-        function clearFiles() {
-            selectedFiles = [];
-            updateFileList();
-        }
-
-        // 音声ファイルを動画に変換
-        async function convertAudioToVideo(audioFile) {
-            try {
-                console.log(`音声変換開始: ${audioFile.name}`);
-                
-                if (!isFFmpegLoaded) {
-                    await initFFmpeg();
-                }
-
-                // ファイルをFFmpegに読み込み
-                const audioData = new Uint8Array(await audioFile.arrayBuffer());
-                await ffmpeg.writeFile('input.mp3', audioData);
-
-                // 音声を動画に変換（静止画付き）
-                await ffmpeg.exec([
-                    '-f', 'lavfi',
-                    '-i', 'color=c=black:s=1280x720:d=1',
-                    '-i', 'input.mp3',
-                    '-c:v', 'libx264',
-                    '-c:a', 'aac',
-                    '-shortest',
-                    '-pix_fmt', 'yuv420p',
-                    'output.mp4'
-                ]);
-
-                // 変換結果を取得
-                const videoData = await ffmpeg.readFile('output.mp4');
-                const videoBlob = new Blob([videoData], { type: 'video/mp4' });
-                
-                // 元のファイル名から拡張子を変更
-                const originalName = getFileNameWithoutExtension(audioFile.name);
-                const videoFile = new File([videoBlob], `${originalName}.mp4`, { type: 'video/mp4' });
-                
-                console.log(`音声変換完了: ${audioFile.name} -> ${videoFile.name}`);
-                return videoFile;
-            } catch (error) {
-                console.error('音声変換エラー:', error);
-                throw new Error(`音声変換に失敗しました: ${error.message}`);
-            }
-        }
-
-        // 動画アップロード
-        async function uploadVideo(file, index) {
-            try {
-                const titleTemplate = document.getElementById('title-template').value || '{filename} #{index}';
-                const description = document.getElementById('description').value || '';
-                const privacyStatus = document.getElementById('privacy-status').value || 'private';
-                
-                // タイトル生成
-                const filename = getFileNameWithoutExtension(file.name);
-                const title = titleTemplate
-                    .replace('{filename}', filename)
-                    .replace('{index}', (index + 1).toString());
-
-                console.log(`動画アップロード開始: ${title}`);
-
-                // メタデータ
-                const metadata = {
-                    snippet: {
-                        title: title,
-                        description: description,
-                        tags: ['youtube.up', 'upload'],
-                        categoryId: '22'
-                    },
-                    status: {
-                        privacyStatus: privacyStatus
+                    const location = initResponse.headers.get('Location');
+                    if (!location) {
+                        throw new Error('アップロードURLが取得できませんでした');
                     }
-                };
 
-                // アップロード実行
-                const response = await gapi.client.request({
-                    path: 'https://www.googleapis.com/upload/youtube/v3/videos',
-                    method: 'POST',
-                    params: {
-                        part: 'snippet,status'
-                    },
-                    headers: {
-                        'Content-Type': 'video/mp4'
-                    },
-                    body: JSON.stringify(metadata)
-                });
+                    updateProgress(index, 50, 'ファイルアップロード中...');
 
-                // 実際のファイルアップロード
-                const uploadResponse = await fetch(`https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status`, {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${gapi.auth2.getAuthInstance().currentUser.get().getAuthResponse().access_token}`,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(metadata)
-                });
+                    // ファイル本体をアップロード
+                    const fileUploadResponse = await fetch(location, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'video/mp4'
+                        },
+                        body: file
+                    });
 
-                if (!uploadResponse.ok) {
-                    throw new Error(`アップロード初期化失敗: ${uploadResponse.status}`);
-                }
+                    updateProgress(index, 80, '処理完了中...');
 
-                const location = uploadResponse.headers.get('Location');
-                
-                // ファイル本体をアップロード
-                const fileUploadResponse = await fetch(location, {
-                    method: 'PUT',
-                    headers: {
-                        'Content-Type': 'video/mp4'
-                    },
-                    body: file
-                });
-
-                if (!fileUploadResponse.ok) {
-                    throw new Error(`ファイルアップロード失敗: ${fileUploadResponse.status}`);
-                }
-
-                const result = await fileUploadResponse.json();
-                const videoId = result.id;
-
-                console.log(`動画アップロード成功: ${title} (ID: ${videoId})`);
-
-                // 再生リストに追加
-                const playlistId = document.getElementById('existing-playlist-select').value || currentPlaylistId;
-                if (playlistId) {
-                    await addVideoToPlaylist(videoId, playlistId);
-                }
-
-                // サムネイル設定
-                const thumbnailFile = document.getElementById('thumbnail-input').files[0];
-                if (thumbnailFile) {
-                    await uploadThumbnail(videoId, thumbnailFile);
-                }
-
-                return { success: true, videoId, title };
-            } catch (error) {
-                console.error('動画アップロードエラー:', error);
-                
-                // クォータ制限エラーの特別処理
-                if (error.message.includes('quotaExceeded')) {
-                    throw new Error('YouTube APIのクォータ制限に達しました。明日再試行してください。');
-                } else if (error.message.includes('uploadLimitExceeded')) {
-                    throw new Error('アップロード制限に達しました。電話番号が検証済みのアカウントが必要です。');
-                }
-                
-                throw error;
-            }
-        }
-
-        // 再生リストに動画追加
-        async function addVideoToPlaylist(videoId, playlistId) {
-            try {
-                await gapi.client.youtube.playlistItems.insert({
-                    part: 'snippet',
-                    resource: {
-                        snippet: {
-                            playlistId: playlistId,
-                            resourceId: {
-                                kind: 'youtube#video',
-                                videoId: videoId
-                            }
-                        }
-                    }
-                });
-                console.log(`再生リストに動画追加: ${videoId} -> ${playlistId}`);
-            } catch (error) {
-                console.
+                    if (!fileUploadResponse.ok) {
+                        const errorText = await fileUploadResponse.text();
+                        throw
